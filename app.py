@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-YouTube Downloader Web App
-Simple Flask app to download YouTube videos via web interface with real-time progress
+Universal Video Downloader Web App
+Downloads videos from YouTube, Vimeo, TikTok, Twitter, Instagram, and 1000+ sites
 """
 
 from flask import Flask, render_template, request, send_from_directory, jsonify
@@ -58,7 +58,8 @@ def download_video(url: str, download_id: str, format_type: str = 'mp4', downloa
         'error': None,
         'message': 'Initializing...',
         'format': format_type,
-        'download_dir': download_dir
+        'download_dir': download_dir,
+        'url': url
     }
 
     if format_type == 'mp3':
@@ -96,7 +97,11 @@ def download_video(url: str, download_id: str, format_type: str = 'mp4', downloa
             'progress': '100',
             'filename': os.path.basename(final_filename),
             'error': None,
-            'message': 'Download complete!'
+            'message': 'Download complete!',
+            'title': info.get('title', 'Unknown'),
+            'uploader': info.get('uploader', 'Unknown'),
+            'duration': info.get('duration', 0),
+            'thumbnail': info.get('thumbnail', '')
         })
         print(f"[{download_id}] Complete: {final_filename}")
 
@@ -187,6 +192,28 @@ def preferences():
         return jsonify({
             'download_dir': user_preferences.get('download_dir', DEFAULT_DOWNLOAD_DIR)
         })
+
+
+@app.route('/supported-sites')
+def supported_sites():
+    """Return list of popular supported sites"""
+    sites = [
+        {'name': 'YouTube', 'url': 'youtube.com', 'icon': '📺'},
+        {'name': 'Vimeo', 'url': 'vimeo.com', 'icon': '🎬'},
+        {'name': 'TikTok', 'url': 'tiktok.com', 'icon': '🎵'},
+        {'name': 'Twitter/X', 'url': 'twitter.com', 'icon': '🐦'},
+        {'name': 'Instagram', 'url': 'instagram.com', 'icon': '📸'},
+        {'name': 'Facebook', 'url': 'facebook.com', 'icon': '👥'},
+        {'name': 'Twitch', 'url': 'twitch.tv', 'icon': '🎮'},
+        {'name': 'Reddit', 'url': 'reddit.com', 'icon': '🔴'},
+        {'name': 'SoundCloud', 'url': 'soundcloud.com', 'icon': '🎧'},
+        {'name': 'Dailymotion', 'url': 'dailymotion.com', 'icon': '🎥'},
+        {'name': 'TED', 'url': 'ted.com', 'icon': '🎤'},
+        {'name': 'Vine', 'url': 'vine.co', 'icon': '🍇'},
+        {'name': 'Snapchat', 'url': 'snapchat.com', 'icon': '👻'},
+        {'name': 'LinkedIn', 'url': 'linkedin.com', 'icon': '💼'},
+    ]
+    return jsonify(sites)
 
 
 if __name__ == '__main__':

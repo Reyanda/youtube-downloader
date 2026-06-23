@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Downloader</title>
+    <title>Universal Video Downloader</title>
     <style>
         * {
             margin: 0;
@@ -34,18 +34,84 @@
             color: #1a1a2e;
             margin-bottom: 8px;
             font-size: 28px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .h1-icon {
+            font-size: 32px;
         }
 
         .subtitle {
             color: #666;
-            margin-bottom: 30px;
+            margin-bottom: 12px;
             font-size: 14px;
+        }
+
+        .supported-sites {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 25px;
+        }
+
+        .site-tag {
+            font-size: 11px;
+            padding: 4px 10px;
+            background: #f0f0f0;
+            border-radius: 12px;
+            color: #666;
+        }
+
+        .site-tag .icon {
+            margin-right: 4px;
         }
 
         .input-group {
             display: flex;
             gap: 10px;
             margin-bottom: 15px;
+        }
+
+        input {
+            flex: 1;
+            padding: 14px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #6366f1;
+        }
+
+        button {
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            background: #999;
+            cursor: not-allowed;
+            box-shadow: none;
         }
 
         .format-selector {
@@ -82,13 +148,13 @@
         }
 
         .format-option input[type="radio"]:checked + .format-label {
-            border-color: #ff0000;
-            background: #fff5f5;
-            color: #ff0000;
+            border-color: #6366f1;
+            background: #f5f5ff;
+            color: #6366f1;
         }
 
         .format-label:hover {
-            border-color: #ff0000;
+            border-color: #6366f1;
         }
 
         .format-icon {
@@ -122,12 +188,12 @@
 
         .location-input:focus {
             outline: none;
-            border-color: #ff0000;
+            border-color: #6366f1;
         }
 
         .location-btn {
             padding: 8px 14px;
-            background: #ff0000;
+            background: #6366f1;
             color: white;
             border: none;
             border-radius: 6px;
@@ -138,49 +204,10 @@
         }
 
         .location-btn:hover {
-            background: #cc0000;
+            background: #4f46e5;
         }
 
         .location-btn:disabled {
-            background: #999;
-            cursor: not-allowed;
-        }
-
-        input {
-            flex: 1;
-            padding: 14px 16px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            font-size: 14px;
-            transition: border-color 0.2s;
-        }
-
-        input:focus {
-            outline: none;
-            border-color: #ff0000;
-        }
-
-        button {
-            padding: 14px 24px;
-            background: #ff0000;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s, transform 0.1s;
-        }
-
-        button:hover {
-            background: #cc0000;
-        }
-
-        button:active {
-            transform: scale(0.98);
-        }
-
-        button:disabled {
             background: #999;
             cursor: not-allowed;
         }
@@ -206,7 +233,7 @@
 
         .progress-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #ff0000, #ff4444);
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
             border-radius: 4px;
             transition: width 0.3s ease;
             width: 0%;
@@ -301,7 +328,7 @@
         }
 
         .download-item a {
-            color: #ff0000;
+            color: #6366f1;
             text-decoration: none;
             font-size: 13px;
             font-weight: 500;
@@ -309,6 +336,13 @@
 
         .download-item a:hover {
             text-decoration: underline;
+        }
+
+        .empty-state {
+            color: #999;
+            font-size: 13px;
+            text-align: center;
+            padding: 20px;
         }
 
         .file-badge {
@@ -329,13 +363,6 @@
             color: #1976d2;
         }
 
-        .empty-state {
-            color: #999;
-            font-size: 13px;
-            text-align: center;
-            padding: 20px;
-        }
-
         /* Animation */
         @keyframes pulse {
             0%, 100% { opacity: 1; }
@@ -346,7 +373,7 @@
             display: inline-block;
             width: 8px;
             height: 8px;
-            background: #ff0000;
+            background: #6366f1;
             border-radius: 50%;
             margin-right: 6px;
             animation: pulse 1.5s infinite;
@@ -355,14 +382,18 @@
 </head>
 <body>
     <div class="container">
-        <h1>YouTube Downloader</h1>
-        <p class="subtitle">Paste a YouTube URL to download as MP4</p>
+        <h1><span class="h1-icon">🎬</span> Video Downloader</h1>
+        <p class="subtitle">Download videos from 1000+ sites - paste any URL below</p>
+
+        <div class="supported-sites" id="supportedSites">
+            <!-- Populated by JS -->
+        </div>
 
         <div class="input-group">
             <input
                 type="text"
                 id="urlInput"
-                placeholder="https://www.youtube.com/watch?v=..."
+                placeholder="Paste video URL from any site..."
                 autofocus
             >
             <button id="downloadBtn" onclick="startDownload()">Download</button>
@@ -444,6 +475,19 @@
     <script>
         let pollInterval = null;
         let currentDownloadDir = './downloads';
+
+        async function loadSupportedSites() {
+            try {
+                const res = await fetch('/supported-sites');
+                const sites = await res.json();
+                const container = document.getElementById('supportedSites');
+                container.innerHTML = sites.map(s =>
+                    `<span class="site-tag"><span class="icon">${s.icon}</span>${s.name}</span>`
+                ).join('');
+            } catch (err) {
+                console.error('Failed to load supported sites', err);
+            }
+        }
 
         async function loadPreferences() {
             try {
@@ -625,7 +669,8 @@
             if (e.key === 'Enter') startDownload();
         });
 
-        // Load preferences and downloads on page load
+        // Initialize
+        loadSupportedSites();
         loadPreferences();
         loadDownloads();
     </script>

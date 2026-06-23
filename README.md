@@ -1,6 +1,6 @@
-# 📥 YouTube Downloader
+# 🎬 Universal Video Downloader
 
-A simple, elegant YouTube downloader with a web interface. Download videos as MP4 or extract audio as MP3 with real-time progress tracking.
+A powerful video downloader that supports 1000+ websites. Download videos as MP4 or extract audio as MP3 with real-time progress tracking.
 
 ![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)
 ![Flask](https://img.shields.io/badge/Flask-3.0+-green.svg)
@@ -8,6 +8,7 @@ A simple, elegant YouTube downloader with a web interface. Download videos as MP
 
 ## ✨ Features
 
+- 🌐 **1000+ Sites Supported** - YouTube, Vimeo, TikTok, Twitter, Instagram, Facebook, Twitch, Reddit, and more
 - 🎬 **Download as MP4** - High quality video downloads
 - 🎵 **Extract as MP3** - Audio extraction at 192kbps
 - 📊 **Real-time Progress** - Live speed, ETA, and percentage
@@ -21,7 +22,7 @@ A simple, elegant YouTube downloader with a web interface. Download videos as MP
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/youtube-downloader.git
+git clone https://github.com/Reyanda/youtube-downloader.git
 cd youtube-downloader
 
 # Install dependencies
@@ -36,11 +37,27 @@ python app.py
 
 Then open **http://localhost:8080** in your browser.
 
+## 🌍 Supported Sites
+
+This downloader uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) which supports **over 1000 websites**, including:
+
+| Icon | Site | Icon | Site |
+|------|------|------|------|
+| 📺 | YouTube | 🎬 | Vimeo |
+| 🎵 | TikTok | 🐦 | Twitter/X |
+| 📸 | Instagram | 👥 | Facebook |
+| 🎮 | Twitch | 🔴 | Reddit |
+| 🎧 | SoundCloud | 🎥 | Dailymotion |
+| 🎤 | TED | 🍇 | Vine |
+| 👻 | Snapchat | 💼 | LinkedIn |
+
+And hundreds more! The full list is available at [yt-dlp supported sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md).
+
 ## 📸 Screenshots
 
 | Main Interface | Download Progress |
 |----------------|------------------|
-| ![Main](https://via.placeholder.com/400x300?text=Paste+URL+and+choose+format) | ![Progress](https://via.placeholder.com/400x300?text=Real-time+progress+bar) |
+| Supported sites | Real-time progress bar |
 
 ## 🛠️ Configuration
 
@@ -60,12 +77,12 @@ The default is `./downloads` folder in the project directory. Users can change t
 ## 📦 Requirements
 
 - Python 3.7 or higher
-- yt-dlp (YouTube downloader backend)
-- Flask (Web framework)
+- yt-dlp (video downloader backend)
+- Flask (web framework)
 
 ## 🎯 Usage
 
-1. **Paste YouTube URL** - Enter any YouTube video URL
+1. **Paste Video URL** - Enter any video URL from supported sites
 2. **Choose Format** - Select MP4 (video) or MP3 (audio)
 3. **Set Location** (optional) - Choose where to save files
 4. **Click Download** - Watch real-time progress
@@ -76,8 +93,10 @@ The default is `./downloads` folder in the project directory. Users can change t
 A simple CLI script is also included:
 
 ```bash
-python downloader.py <youtube_url>
+python downloader.py <video_url>
 ```
+
+Works with any supported site!
 
 ## 📝 License
 
@@ -93,13 +112,13 @@ Contributions are welcome! Feel free to:
 
 ## ⚠️ Disclaimer
 
-Please respect copyright laws and YouTube's Terms of Service. Only download videos you have permission to download.
+Please respect copyright laws and website Terms of Service. Only download videos you have permission to download.
 
 ## 🙏 Acknowledgments
 
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The powerful YouTube downloader backend
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - The powerful video downloader backend
 - [Flask](https://flask.palletsprojects.com/) - The web framework
 
 ---
 
-Made with ❤️ for easy YouTube downloads
+Made with ❤️ for easy video downloads from anywhere on the web
