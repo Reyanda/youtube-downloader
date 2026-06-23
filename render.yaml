@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: video-downloader
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: PORT
+        value: 8080
+      - key: FLASK_ENV
+        value: production
