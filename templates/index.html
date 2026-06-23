@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 540px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: #1a1a2e;
+            margin-bottom: 8px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .format-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .format-option {
+            flex: 1;
+            position: relative;
+        }
+
+        .format-option input[type="radio"] {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .format-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .format-option input[type="radio"]:checked + .format-label {
+            border-color: #ff0000;
+            background: #fff5f5;
+            color: #ff0000;
+        }
+
+        .format-label:hover {
+            border-color: #ff0000;
+        }
+
+        .format-icon {
+            font-size: 16px;
+        }
+
+        .location-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .location-label {
+            font-size: 12px;
+            color: #666;
+            white-space: nowrap;
+        }
+
+        .location-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: monospace;
+        }
+
+        .location-input:focus {
+            outline: none;
+            border-color: #ff0000;
+        }
+
+        .location-btn {
+            padding: 8px 14px;
+            background: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .location-btn:hover {
+            background: #cc0000;
+        }
+
+        .location-btn:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        input {
+            flex: 1;
+            padding: 14px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #ff0000;
+        }
+
+        button {
+            padding: 14px 24px;
+            background: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        button:hover {
+            background: #cc0000;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            background: #999;
+            cursor: not-allowed;
+        }
+
+        /* Progress container */
+        .progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progress-container.active {
+            display: block;
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff0000, #ff4444);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-info {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .progress-info-item {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .progress-info-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #999;
+        }
+
+        .progress-info-value {
+            font-weight: 600;
+            color: #1a1a2e;
+        }
+
+        /* Status messages */
+        .status-message {
+            margin-top: 16px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            display: none;
+        }
+
+        .status-message.downloading {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status-message.complete {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .status-message.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        /* Downloads list */
+        .downloads-list {
+            margin-top: 30px;
+            border-top: 1px solid #e0e0e0;
+            padding-top: 20px;
+        }
+
+        .downloads-list h3 {
+            color: #1a1a2e;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+
+        .download-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .download-item .name {
+            flex: 1;
+            font-size: 13px;
+            color: #333;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .download-item .size {
+            font-size: 12px;
+            color: #999;
+            margin: 0 10px;
+        }
+
+        .download-item a {
+            color: #ff0000;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .download-item a:hover {
+            text-decoration: underline;
+        }
+
+        .file-badge {
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin-right: 8px;
+        }
+
+        .file-badge.audio {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .file-badge.video {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .empty-state {
+            color: #999;
+            font-size: 13px;
+            text-align: center;
+            padding: 20px;
+        }
+
+        /* Animation */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .live-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #ff0000;
+            border-radius: 50%;
+            margin-right: 6px;
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YouTube Downloader</h1>
+        <p class="subtitle">Paste a YouTube URL to download as MP4</p>
+
+        <div class="input-group">
+            <input
+                type="text"
+                id="urlInput"
+                placeholder="https://www.youtube.com/watch?v=..."
+                autofocus
+            >
+            <button id="downloadBtn" onclick="startDownload()">Download</button>
+        </div>
+
+        <div class="format-selector">
+            <div class="format-option">
+                <input type="radio" name="format" id="formatMp4" value="mp4" checked>
+                <label class="format-label" for="formatMp4">
+                    <span class="format-icon">🎬</span>
+                    MP4 Video
+                </label>
+            </div>
+            <div class="format-option">
+                <input type="radio" name="format" id="formatMp3" value="mp3">
+                <label class="format-label" for="formatMp3">
+                    <span class="format-icon">🎵</span>
+                    MP3 Audio
+                </label>
+            </div>
+        </div>
+
+        <div class="location-selector">
+            <span class="location-label">📁 Save to:</span>
+            <input
+                type="text"
+                id="locationInput"
+                class="location-input"
+                placeholder="Default: ./downloads"
+            >
+            <button id="locationBtn" class="location-btn" onclick="setDownloadLocation()">Set</button>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" id="progressBar"></div>
+            </div>
+
+            <div class="progress-info">
+                <div class="progress-info-item">
+                    <span class="progress-info-label">Progress</span>
+                    <span class="progress-info-value" id="progressPercent">0%</span>
+                </div>
+                <div class="progress-info-item">
+                    <span class="progress-info-label">Speed</span>
+                    <span class="progress-info-value" id="progressSpeed">--</span>
+                </div>
+                <div class="progress-info-item">
+                    <span class="progress-info-label">ETA</span>
+                    <span class="progress-info-value" id="progressEta">--</span>
+                </div>
+            </div>
+
+            <div class="progress-info" style="margin-top: 10px;">
+                <div class="progress-info-item">
+                    <span class="progress-info-label">Downloaded</span>
+                    <span class="progress-info-value" id="progressDownloaded">--</span>
+                </div>
+                <div class="progress-info-item">
+                    <span class="progress-info-label">Total Size</span>
+                    <span class="progress-info-value" id="progressSize">--</span>
+                </div>
+                <div class="progress-info-item">
+                    <span class="progress-info-label">Status</span>
+                    <span class="progress-info-value" id="progressStatus"><span class="live-indicator"></span>Starting</span>
+                </div>
+            </div>
+
+            <div class="status-message" id="statusMessage"></div>
+        </div>
+
+        <div class="downloads-list">
+            <h3>Recent Downloads</h3>
+            <div id="downloadsList"></div>
+        </div>
+    </div>
+
+    <script>
+        let pollInterval = null;
+        let currentDownloadDir = './downloads';
+
+        async function loadPreferences() {
+            try {
+                const res = await fetch('/preferences');
+                const data = await res.json();
+                currentDownloadDir = data.download_dir;
+                document.getElementById('locationInput').value = currentDownloadDir;
+            } catch (err) {
+                console.error('Failed to load preferences', err);
+            }
+        }
+
+        async function setDownloadLocation() {
+            const newDir = document.getElementById('locationInput').value.trim();
+            if (!newDir) return;
+
+            const btn = document.getElementById('locationBtn');
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/preferences', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ download_dir: newDir })
+                });
+
+                const data = await res.json();
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                } else {
+                    currentDownloadDir = data.download_dir;
+                    loadDownloads();
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function startDownload() {
+            const url = document.getElementById('urlInput').value.trim();
+            const format = document.querySelector('input[name="format"]:checked').value;
+            if (!url) return;
+
+            const btn = document.getElementById('downloadBtn');
+            const progressContainer = document.getElementById('progressContainer');
+
+            btn.disabled = true;
+            progressContainer.classList.add('active');
+            resetProgress();
+
+            try {
+                const res = await fetch('/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, format, download_dir: currentDownloadDir })
+                });
+
+                const data = await res.json();
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                pollStatus(data.download_id);
+
+            } catch (err) {
+                showStatus('error', 'Error: ' + err.message);
+                btn.disabled = false;
+            }
+        }
+
+        async function pollStatus(downloadId) {
+            const btn = document.getElementById('downloadBtn');
+
+            pollInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/status/${downloadId}`);
+                    const data = await res.json();
+
+                    if (data.status === 'downloading' || data.status === 'processing') {
+                        updateProgress(data);
+                    } else if (data.status === 'complete') {
+                        clearInterval(pollInterval);
+                        updateProgress(data);
+                        showStatus('complete', '✓ Download complete!');
+                        btn.disabled = false;
+                        document.getElementById('urlInput').value = '';
+                        loadDownloads();
+                    } else if (data.status === 'error') {
+                        clearInterval(pollInterval);
+                        showStatus('error', 'Error: ' + data.error);
+                        btn.disabled = false;
+                    }
+
+                } catch (err) {
+                    clearInterval(pollInterval);
+                    showStatus('error', 'Error checking status');
+                    btn.disabled = false;
+                }
+            }, 500);
+        }
+
+        function updateProgress(data) {
+            const progress = data.progress || '0';
+            document.getElementById('progressBar').style.width = progress + '%';
+            document.getElementById('progressPercent').textContent = progress + '%';
+            document.getElementById('progressSpeed').textContent = data.speed || '--';
+            document.getElementById('progressEta').textContent = data.eta || '--';
+            document.getElementById('progressDownloaded').textContent = data.downloaded || '--';
+            document.getElementById('progressSize').textContent = data.size || '--';
+
+            const statusEl = document.getElementById('progressStatus');
+            if (data.status === 'downloading') {
+                statusEl.innerHTML = '<span class="live-indicator"></span>Downloading';
+            } else if (data.status === 'processing') {
+                statusEl.innerHTML = '<span class="live-indicator"></span>Processing';
+            } else if (data.status === 'complete') {
+                statusEl.textContent = 'Complete';
+            }
+        }
+
+        function resetProgress() {
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressPercent').textContent = '0%';
+            document.getElementById('progressSpeed').textContent = '--';
+            document.getElementById('progressEta').textContent = '--';
+            document.getElementById('progressDownloaded').textContent = '--';
+            document.getElementById('progressSize').textContent = '--';
+            document.getElementById('progressStatus').innerHTML = '<span class="live-indicator"></span>Starting';
+            document.getElementById('statusMessage').style.display = 'none';
+        }
+
+        function showStatus(type, message) {
+            const statusEl = document.getElementById('statusMessage');
+            statusEl.className = 'status-message ' + type;
+            statusEl.textContent = message;
+            statusEl.style.display = 'block';
+        }
+
+        async function loadDownloads() {
+            try {
+                const res = await fetch('/downloads');
+                const files = await res.json();
+                const list = document.getElementById('downloadsList');
+
+                if (files.length === 0) {
+                    list.innerHTML = '<p class="empty-state">No downloads yet</p>';
+                    return;
+                }
+
+                list.innerHTML = files.map(f => `
+                    <div class="download-item">
+                        <span class="name">
+                            <span class="file-badge ${f.type === 'audio' ? 'audio' : 'video'}">
+                                ${f.type === 'audio' ? 'MP3' : 'MP4'}
+                            </span>
+                            ${f.name}
+                        </span>
+                        <span class="size">${formatSize(f.size)}</span>
+                        <a href="${f.url}" download>Download</a>
+                    </div>
+                `).join('');
+
+            } catch (err) {
+                console.error('Failed to load downloads', err);
+            }
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024 * 1024) {
+                return (bytes / 1024).toFixed(1) + ' KB';
+            }
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // Allow Enter key to start download
+        document.getElementById('urlInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') startDownload();
+        });
+
+        // Load preferences and downloads on page load
+        loadPreferences();
+        loadDownloads();
+    </script>
+</body>
+</html>
