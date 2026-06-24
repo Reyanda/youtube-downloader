@@ -14,6 +14,7 @@ import threading
 import time
 import hashlib
 import secrets
+import base64
 import html
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs, quote, unquote
@@ -81,30 +82,37 @@ def session_cookie(sid):
     return f"{COOKIE_NAME}={sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"
 
 # ── Google OAuth state (CSRF) + access-token helper ─────────────────
-_oauth_states = {}        # state -> (session, created_ts)
+_oauth_states = {}        # state -> (session, created_ts, extra)
 _oauth_lock = threading.Lock()
 OAUTH_STATE_TTL = 600     # seconds
 
-def oauth_new_state(session):
+# Launcher origins allowed to receive a login profile back from OAuth.
+DEFAULT_LOGIN_RETURN = "https://reyanda.github.io/"
+LOGIN_RETURN_ALLOW = {
+    "https://reyanda.github.io/",
+    "https://reyanda.github.io",
+}
+
+def oauth_new_state(session, extra=None):
     state = secrets.token_urlsafe(24)
     now = time.time()
     with _oauth_lock:
         # opportunistic prune of expired states
-        for s in [k for k, (_, ts) in _oauth_states.items() if now - ts > OAUTH_STATE_TTL]:
+        for s in [k for k, (_, ts, _e) in _oauth_states.items() if now - ts > OAUTH_STATE_TTL]:
             _oauth_states.pop(s, None)
-        _oauth_states[state] = (session, now)
+        _oauth_states[state] = (session, now, extra or {})
     return state
 
 def oauth_take_state(state):
-    """Consume a state token, returning its session or None."""
+    """Consume a state token, returning (session, extra) or (None, None)."""
     with _oauth_lock:
         entry = _oauth_states.pop(state, None)
     if not entry:
-        return None
-    session, ts = entry
+        return None, None
+    session, ts, extra = entry
     if time.time() - ts > OAUTH_STATE_TTL:
-        return None
-    return session
+        return None, None
+    return session, extra
 
 def google_access_token(session):
     """Return a valid access token for the session, refreshing if needed."""
@@ -1201,6 +1209,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_redirect(gdrive.auth_url(state), cookie=set_cookie)
             return
 
+        # Launcher login — server-side OAuth so it works without the
+        # static origin (reyanda.github.io) being a registered JS origin.
+        # Only Render's redirect URI needs registering, and it already is.
+        if path == '/api/auth/google/login':
+            ret = parse_qs(parsed.query).get('return', [''])[0]
+            ret = ret if ret in LOGIN_RETURN_ALLOW else DEFAULT_LOGIN_RETURN
+            if not gdrive.configured():
+                self.send_redirect(ret + '#rs_auth_error=not_configured')
+                return
+            sid = get_session(self)
+            set_cookie = None
+            if not sid:
+                sid = new_session()
+                set_cookie = session_cookie(sid)
+            state = oauth_new_state(sid, {'kind': 'login', 'return': ret})
+            self.send_redirect(gdrive.login_url(state), cookie=set_cookie)
+            return
+
         if path == '/api/auth/google/callback':
             if not gdrive.configured():
                 self.send_json({'error': 'Google Drive not configured'}, 503)
@@ -1208,21 +1234,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
             qs = parse_qs(parsed.query)
             code = qs.get('code', [None])[0]
             state = qs.get('state', [None])[0]
-            sess_for_state = oauth_take_state(state) if state else None
+            sess_for_state, extra = oauth_take_state(state) if state else (None, None)
+            is_login = bool(extra and extra.get('kind') == 'login')
+            ret = (extra or {}).get('return') or DEFAULT_LOGIN_RETURN
             if not code or not sess_for_state:
-                self.send_redirect('/?drive=error')
+                self.send_redirect(
+                    (ret + '#rs_auth_error=denied') if is_login else '/?drive=error')
                 return
             try:
                 tok = gdrive.exchange_code(code)
                 access = tok.get('access_token')
                 info = gdrive.userinfo(access) if access else {}
+                if is_login:
+                    # Hand the verified profile back to the launcher in the URL
+                    # fragment — never sent to a server, never logged.
+                    user = {
+                        'name': info.get('name') or (info.get('email') or '').split('@')[0],
+                        'email': info.get('email', ''),
+                        'picture': info.get('picture', ''),
+                        'sub': info.get('sub', ''),
+                    }
+                    blob = base64.urlsafe_b64encode(
+                        json.dumps(user).encode()).decode().rstrip('=')
+                    self.send_redirect(ret + '#rs_auth=' + blob)
+                    return
                 expiry = time.time() + int(tok.get('expires_in', 3600))
                 library.set_google(sess_for_state, info.get('email'),
                                    access, tok.get('refresh_token'), expiry)
                 self.send_redirect('/?drive=connected')
             except Exception as e:
                 print(f"[gdrive] callback failed: {e}", file=sys.stderr)
-                self.send_redirect('/?drive=error')
+                self.send_redirect(
+                    (ret + '#rs_auth_error=exchange') if is_login else '/?drive=error')
             return
 
         # Static files

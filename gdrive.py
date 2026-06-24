@@ -30,6 +30,7 @@ CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 REDIRECT_BASE = os.environ.get("OAUTH_REDIRECT_BASE", "").rstrip("/")
 
 SCOPES = "openid email https://www.googleapis.com/auth/drive.file"
+LOGIN_SCOPES = "openid email profile"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
@@ -57,6 +58,19 @@ def auth_url(state):
         "access_type": "offline",   # request a refresh token
         "include_granted_scopes": "true",
         "prompt": "consent",
+        "state": state,
+    }
+    return AUTH_URL + "?" + urllib.parse.urlencode(params)
+
+
+def login_url(state):
+    """Consent URL for launcher sign-in — identity only, no Drive scope."""
+    params = {
+        "client_id": CLIENT_ID,
+        "redirect_uri": redirect_uri(),
+        "response_type": "code",
+        "scope": LOGIN_SCOPES,
+        "prompt": "select_account",
         "state": state,
     }
     return AUTH_URL + "?" + urllib.parse.urlencode(params)
