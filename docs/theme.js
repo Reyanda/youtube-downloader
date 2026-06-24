@@ -115,6 +115,14 @@
   }
 
   // apply ----------------------------------------------------------------
+  // Apply the rich background to the page backdrop (body). theme.js runs in
+  // <head>, so defer to DOMContentLoaded when body isn't ready yet.
+  var _backdrop = '';
+  function applyBackdrop(v) {
+    _backdrop = v || '';
+    if (document.body) document.body.style.background = _backdrop;
+  }
+
   function apply(s) {
     s = s || load();
     var root = document.documentElement, st = root.style;
@@ -159,7 +167,14 @@
     st.setProperty('--font-body', FONTS[s.uiFont] || FONTS.system);
     st.setProperty('--fg', dark ? '#f5f5f7' : '#0c1626');
     st.setProperty('--muted', dark ? '#8e8e93' : '#6e6e73');
-    st.setProperty('--bg', dark ? bg.d : bg.l);
+    // --bg MUST stay a solid colour: it's used in both `background:` and
+    // `color: var(--bg)` contexts, and a gradient value breaks the latter
+    // (e.g. an invisible button label). The rich background gradient is
+    // applied to the page backdrop (body) separately, via --app-bg.
+    var bgFull = dark ? bg.d : bg.l;
+    st.setProperty('--bg', dark ? '#0b1220' : '#f4f7fb');
+    st.setProperty('--app-bg', bgFull);
+    applyBackdrop(bgFull);
     var cardRgb = dark ? '28,28,30' : '255,255,255';
     st.setProperty('--card', mat.cardAlpha >= 1 ? (dark ? '#1c1c1e' : '#ffffff')
                                                 : 'rgba(' + cardRgb + ',' + mat.cardAlpha + ')');
@@ -302,6 +317,12 @@
   window.ReyandaTheme = api;
 
   apply(load());
+  // body isn't ready while this runs in <head>; paint the backdrop once it is
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      if (_backdrop) document.body.style.background = _backdrop;
+    });
+  }
   // live cross-app + cross-tab sync
   window.addEventListener('storage', function (e) { if (e.key === KEY) apply(load()); });
   document.addEventListener(OCS_EVT, function () { apply(load()); });
