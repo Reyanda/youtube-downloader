@@ -318,7 +318,18 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--fg); m
 .sr-block-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--card); font-size: 13px; font-weight: 600; }
 .sr-pre { margin: 0; padding: 14px; background: var(--bg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.6; color: var(--fg); white-space: pre-wrap; word-break: break-word; }
 .sr-note { font-size: 12px; color: var(--muted); line-height: 1.6; padding: 4px 2px; }
-@media (max-width: 480px) { .sr-concept { flex-wrap: wrap; } .sr-label { width: 100%; } }
+.sr-msg.ok { color: var(--success); }
+.sr-run { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+.sr-run-ctl { display: flex; gap: 8px; align-items: center; }
+.sr-results { margin-top: 14px; }
+.sr-res-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; margin-bottom: 10px; }
+.sr-res-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sr-res-list { display: flex; flex-direction: column; gap: 8px; }
+.sr-res-item { padding: 11px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 11px; }
+.sr-res-title { font-size: 13px; font-weight: 500; line-height: 1.45; }
+.sr-res-meta { font-size: 12px; color: var(--muted); margin-top: 3px; word-break: break-word; }
+.oa-badge { font-size: 10px; font-weight: 600; color: var(--success); border: 1px solid var(--success); border-radius: 100px; padding: 1px 6px; vertical-align: middle; }
+@media (max-width: 480px) { .sr-concept { flex-wrap: wrap; } .sr-label { width: 100%; } .sr-run-ctl { flex-wrap: wrap; } }
 @media (max-width: 480px) { .prov-tiles { grid-template-columns: repeat(2, 1fr); } }
 
 @media (max-width: 480px) { .container { padding: 100px 16px 60px; } .quality-grid { grid-template-columns: repeat(2, 1fr); } .feature-grid { grid-template-columns: 1fr; } .stats { grid-template-columns: repeat(2, 1fr); } .nav-links { display: none; } .lib-card { flex-wrap: wrap; } .lib-actions { width: 100%; } .lib-btn { flex: 1; text-align: center; } }

@@ -29,8 +29,12 @@ _last_call = [0.0]
 _throttle_lock = threading.Lock()
 
 
+EUROPEPMC_SEARCH = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+
+
 def _get_json(url, timeout=20):
-    if NCBI_API_KEY:
+    is_ncbi = "eutils.ncbi" in url
+    if is_ncbi and NCBI_API_KEY:
         url += ("&" if "?" in url else "?") + "api_key=" + NCBI_API_KEY
     with _throttle_lock:
         dt = time.time() - _last_call[0]
@@ -141,6 +145,99 @@ def build(concepts):
                  "tags, add date/language limits and study-design filters per protocol. "
                  "Peer-review the strategy (PRESS) before running."),
     }
+
+
+# ── Run a search → records (PubMed E-utilities, Europe PMC) ─────────
+def run_pubmed(query, retmax=50):
+    es = _get_json(f"{EUTILS}/esearch.fcgi?db=pubmed&retmode=json"
+                   f"&retmax={int(retmax)}&term={urllib.parse.quote(query)}")
+    ids = es.get("esearchresult", {}).get("idlist", [])
+    if not ids:
+        return [], int(es.get("esearchresult", {}).get("count", 0) or 0)
+    total = int(es.get("esearchresult", {}).get("count", 0) or 0)
+    summ = _get_json(f"{EUTILS}/esummary.fcgi?db=pubmed&retmode=json&id={','.join(ids)}")
+    result = summ.get("result", {})
+    recs = []
+    for uid in result.get("uids", []):
+        r = result.get(uid, {})
+        doi = ""
+        for aid in r.get("articleids", []):
+            if aid.get("idtype") == "doi":
+                doi = aid.get("value", "")
+        authors = [a.get("name", "") for a in r.get("authors", [])
+                   if a.get("authtype") == "Author"][:12]
+        recs.append({
+            "source": "PubMed", "pmid": uid, "doi": doi,
+            "title": (r.get("title") or "").rstrip("."),
+            "authors": authors,
+            "journal": r.get("fulljournalname") or r.get("source", ""),
+            "year": (r.get("pubdate", "") or "")[:4], "is_oa": None,
+        })
+    return recs, total
+
+
+def run_europepmc(query, retmax=50):
+    data = _get_json(f"{EUROPEPMC_SEARCH}?query={urllib.parse.quote(query)}"
+                     f"&format=json&pageSize={int(retmax)}&resultType=lite")
+    rl = data.get("resultList", {}).get("result", [])
+    total = int(data.get("hitCount", 0) or 0)
+    recs = []
+    for a in rl:
+        authors = [x.strip() for x in (a.get("authorString", "") or "").split(",") if x.strip()][:12]
+        recs.append({
+            "source": "Europe PMC", "pmid": a.get("pmid", ""), "doi": a.get("doi", ""),
+            "title": (a.get("title") or "").rstrip("."), "authors": authors,
+            "journal": a.get("journalTitle", ""), "year": str(a.get("pubYear", "")),
+            "is_oa": a.get("isOpenAccess") == "Y",
+        })
+    return recs, total
+
+
+def dedupe(records):
+    seen, out = set(), []
+    for r in records:
+        key = (r.get("doi") or "").lower().strip() or \
+              ("pmid:" + (r.get("pmid") or "")) if r.get("pmid") else \
+              ("ti:" + (r.get("title") or "").lower()[:80])
+        if key and key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
+def to_ris(records):
+    lines = []
+    for r in records:
+        lines.append("TY  - JOUR")
+        if r.get("title"):
+            lines.append(f"TI  - {r['title']}")
+        for a in r.get("authors", []):
+            lines.append(f"AU  - {a}")
+        if r.get("journal"):
+            lines.append(f"JO  - {r['journal']}")
+        if r.get("year"):
+            lines.append(f"PY  - {r['year']}")
+        if r.get("doi"):
+            lines.append(f"DO  - {r['doi']}")
+        if r.get("pmid"):
+            lines.append(f"AN  - {r['pmid']}")
+        lines.append("ER  - ")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def to_csv(records):
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["title", "authors", "journal", "year", "doi", "pmid", "source", "open_access"])
+    for r in records:
+        w.writerow([r.get("title", ""), "; ".join(r.get("authors", [])),
+                    r.get("journal", ""), r.get("year", ""), r.get("doi", ""),
+                    r.get("pmid", ""), r.get("source", ""),
+                    "" if r.get("is_oa") is None else ("yes" if r["is_oa"] else "no")])
+    return buf.getvalue()
 
 
 # ── Optional: LLM decomposition of a free-text question into PICO concepts ──

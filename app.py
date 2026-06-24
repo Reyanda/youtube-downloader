@@ -1538,6 +1538,85 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'error': f'Strategy build failed: {e}'}, 502)
             return
 
+        # Run a strategy against a database → deduped records
+        if path == '/api/search/run':
+            data = self.read_json_body(max_len=16384)
+            if data is None:
+                return
+            query = (data.get('query') or '').strip()
+            if not query:
+                self.send_json({'error': 'No query'}, 400)
+                return
+            source = data.get('source', 'pubmed')
+            retmax = max(1, min(int(data.get('retmax', 50) or 50), 200))
+            try:
+                recs, totals = [], {}
+                if source in ('pubmed', 'both'):
+                    pm, tp = searchstrat.run_pubmed(query, retmax)
+                    recs += pm
+                    totals['pubmed'] = tp
+                if source in ('europepmc', 'both'):
+                    ep, te = searchstrat.run_europepmc(query, retmax)
+                    recs += ep
+                    totals['europepmc'] = te
+                recs = searchstrat.dedupe(recs)
+                self.send_json({'records': recs, 'count': len(recs), 'totals': totals})
+            except Exception as e:
+                self.send_json({'error': f'Search failed: {e}'}, 502)
+            return
+
+        # Export the records the client holds as a downloadable RIS / CSV file
+        if path == '/api/search/export':
+            data = self.read_json_body(max_len=1048576)
+            if data is None:
+                return
+            records = data.get('records') or []
+            fmt = data.get('format', 'ris')
+            if not isinstance(records, list) or not records:
+                self.send_json({'error': 'No records'}, 400)
+                return
+            if fmt == 'csv':
+                body = searchstrat.to_csv(records).encode()
+                ct, fn = 'text/csv', 'search-results.csv'
+            else:
+                body = searchstrat.to_ris(records).encode()
+                ct, fn = 'application/x-research-info-systems', 'search-results.ris'
+            self.send_response(200)
+            self.send_header('Content-Type', ct)
+            self.send_header('Content-Length', len(body))
+            self.send_header('Content-Disposition', f'attachment; filename="{fn}"')
+            self.send_security_headers()
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        # Import records into the sandbox as references (optionally a project)
+        if path == '/api/search/import':
+            data = self.read_json_body(max_len=1048576)
+            if data is None:
+                return
+            sid = get_session(self)
+            if not sid:
+                self.send_json({'error': 'No session'}, 400)
+                return
+            records = data.get('records') or []
+            if not isinstance(records, list) or not records:
+                self.send_json({'error': 'No records'}, 400)
+                return
+            project_id = sanitize_id(data.get('project_id', '')) if data.get('project_id') else None
+            name = (data.get('project_name') or '').strip()[:80]
+            if name and not project_id:
+                project_id = secrets.token_urlsafe(12)
+                library.create_project(sid, name, project_id)
+            n = 0
+            for rec in records[:500]:
+                if not isinstance(rec, dict):
+                    continue
+                library.add_reference(sid, secrets.token_urlsafe(12), project_id, rec)
+                n += 1
+            self.send_json({'imported': n, 'project_id': project_id})
+            return
+
         self.send_error(404)
 
     def _resolve_ai(self, sid, data):

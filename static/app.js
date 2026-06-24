@@ -393,6 +393,7 @@
 
     // ── Systematic review: search-strategy builder ───────────────────
     var SR_LABELS=['Population','Intervention/Exposure','Comparator','Outcome','Other'];
+    var lastStrategy=null, lastResults=[];
     window.addConcept=function(label,terms){
         var wrap=document.getElementById('srConcepts');
         var row=document.createElement('div');row.className='sr-concept';
@@ -426,6 +427,7 @@
     window.buildStrategy=function(){var c=collectConcepts();if(!c.length){srMsg('Add at least one concept with terms.','err');return}postStrategy({concepts:c},document.getElementById('srBuildBtn'))};
     window.buildFromQuestion=function(e){var q=document.getElementById('srQuestion').value.trim();if(!q){srMsg('Type a question first.','err');return}postStrategy({question:q})};
     function renderStrategy(d){
+        lastStrategy=d; lastResults=[];
         var out=document.getElementById('srOutput');
         var blocks=[['PubMed',d.pubmed],['Ovid MEDLINE / Embase',d.ovid],['Cochrane CENTRAL',d.cochrane]];
         var resolved=(d.concepts||[]).map(function(c){
@@ -434,12 +436,68 @@
         }).join('');
         out.innerHTML='<div class="sr-resolved">'+resolved+'</div>'+
             blocks.map(function(b,i){return '<div class="sr-block"><div class="sr-block-head"><span>'+esc(b[0])+'</span><button class="lib-btn sr-copy" data-i="'+i+'">Copy</button></div><pre class="sr-pre">'+esc(b[1]||'')+'</pre></div>'}).join('')+
-            (d.note?('<div class="sr-note">'+esc(d.note)+'</div>'):'');
+            (d.note?('<div class="sr-note">'+esc(d.note)+'</div>'):'')+
+            '<div class="sr-run">'+
+              '<div class="sr-block-head" style="padding:0 0 10px"><span>Run search</span></div>'+
+              '<div class="sr-run-ctl">'+
+                '<select id="srSource" class="sr-label" style="width:auto"><option value="pubmed">PubMed</option><option value="europepmc">Europe PMC</option><option value="both">Both</option></select>'+
+                '<input id="srMax" class="sr-terms" style="max-width:90px;flex:none" type="number" value="50" min="1" max="200" title="Max results">'+
+                '<button class="drive-btn" id="srRunBtn" onclick="window.runSearch()">Run</button>'+
+              '</div>'+
+              '<div class="sr-results" id="srResults"></div>'+
+            '</div>';
         Array.prototype.forEach.call(out.querySelectorAll('.sr-copy'),function(btn){btn.onclick=function(){
             var txt=blocks[+btn.getAttribute('data-i')][1]||'';
             if(navigator.clipboard)navigator.clipboard.writeText(txt).then(function(){btn.textContent='Copied';setTimeout(function(){btn.textContent='Copy'},1200)});
         }});
     }
+
+    window.runSearch=function(){
+        if(!lastStrategy){srMsg('Build a strategy first.','err');return}
+        var src=document.getElementById('srSource').value;
+        var retmax=Math.max(1,Math.min(parseInt(document.getElementById('srMax').value)||50,200));
+        var btn=document.getElementById('srRunBtn');btn.disabled=true;btn.textContent='Running…';
+        var res=document.getElementById('srResults');res.innerHTML='<div class="sr-concept-tag">Searching '+esc(src)+'…</div>';
+        fetch('/api/search/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:lastStrategy.pubmed,source:src,retmax:retmax})})
+        .then(function(r){return r.json()}).then(function(d){
+            btn.disabled=false;btn.textContent='Run';
+            if(d.error){res.innerHTML='<div class="sr-msg err">'+esc(d.error)+'</div>';return}
+            lastResults=d.records||[];renderResults(d);
+        }).catch(function(){btn.disabled=false;btn.textContent='Run';res.innerHTML='<div class="sr-msg err">Search failed.</div>'});
+    };
+    function renderResults(d){
+        var res=document.getElementById('srResults');
+        var totals=Object.keys(d.totals||{}).map(function(k){return k+': '+d.totals[k]}).join(' · ');
+        var head='<div class="sr-res-head"><span><b>'+(d.count||0)+'</b> unique results'+(totals?(' ('+esc(totals)+' total)'):'')+'</span>'+
+            '<span class="sr-res-actions">'+
+              '<button class="lib-btn" onclick="window.exportResults(\'ris\')">RIS</button>'+
+              '<button class="lib-btn" onclick="window.exportResults(\'csv\')">CSV</button>'+
+              '<input id="srProjName" class="sr-terms" style="max-width:150px;flex:none;padding:7px 10px" placeholder="Project name">'+
+              '<button class="lib-btn" onclick="window.importResults()">Send to sandbox</button>'+
+            '</span></div>';
+        var rows=(d.records||[]).map(function(r){
+            var meta=[r.year,r.journal,r.source].filter(Boolean).join(' · ');
+            return '<div class="sr-res-item"><div class="sr-res-title">'+esc(r.title||'(untitled)')+(r.is_oa?' <span class="oa-badge">OA</span>':'')+'</div>'+
+                '<div class="sr-res-meta">'+esc(meta)+(r.doi?(' · '+esc(r.doi)):'')+'</div></div>';
+        }).join('');
+        res.innerHTML=head+'<div class="sr-res-list">'+(rows||'<div class="sr-concept-tag">No results — adjust the strategy.</div>')+'</div>';
+    }
+    window.exportResults=function(fmt){
+        if(!lastResults.length){srMsg('Run a search first.','err');return}
+        fetch('/api/search/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({records:lastResults,format:fmt})})
+        .then(function(r){return r.blob()}).then(function(b){
+            var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='search-results.'+fmt;document.body.appendChild(a);a.click();setTimeout(function(){a.remove();URL.revokeObjectURL(a.href)},1000);
+        }).catch(function(){});
+    };
+    window.importResults=function(){
+        if(!lastResults.length){srMsg('Run a search first.','err');return}
+        var name=(document.getElementById('srProjName').value||'').trim();
+        fetch('/api/search/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({records:lastResults,project_name:name})})
+        .then(function(r){return r.json()}).then(function(d){
+            if(d.error){srMsg(d.error,'err');return}
+            srMsg(d.imported+' references sent to your sandbox'+(name?(' (project: '+name+')'):'')+'.','ok');
+        }).catch(function(){srMsg('Import failed.','err')});
+    };
 
     // React to the OAuth redirect landing back on the page
     (function(){

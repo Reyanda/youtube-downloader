@@ -240,6 +240,29 @@ def persist(job, rid, session, source_url):
     }
 
 
+def add_reference(session, rid, project_id, rec):
+    """Add a search result as a metadata-only resource (a reference) in the
+    sandbox, optionally filed under a project. No PDF yet."""
+    meta = {k: rec.get(k) for k in ("authors", "doi", "journal", "year", "pmid",
+                                    "source", "is_oa") if rec.get(k) is not None}
+    title = rec.get("title") or rec.get("doi") or rid
+    doi = rec.get("doi")
+    pmid = rec.get("pmid")
+    source_url = (f"https://doi.org/{doi}" if doi else
+                  (f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else ""))
+    created = int(time.time())
+    with _lock:
+        _conn.execute(
+            "INSERT OR REPLACE INTO resources "
+            "(id, session, provider, type, title, source_url, filename, filepath, "
+            " size, mime, meta_json, created_at, project_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (rid, session, "article", "article", title, source_url, None, None,
+             0, None, json.dumps(meta), created, project_id),
+        )
+        _conn.commit()
+
+
 def list_resources(session, query=None, project=None, limit=300):
     """Resources for a session, newest first, optionally text/project-filtered.
 
