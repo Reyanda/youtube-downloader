@@ -68,6 +68,12 @@ PROVIDERS = {
         "default_model": None,   # resolved from the local server
         "type": "ollama",
     },
+    "opencode": {
+        "base": os.environ.get("OPENCODE_BASE", "http://localhost:4096"),
+        "key_env": "OPENCODE_API_KEY",
+        "default_model": None,
+        "type": "openai",
+    },
     "custom": {                  # user-supplied OpenAI-compatible endpoint
         "base": "",
         "key_env": None,
@@ -76,7 +82,7 @@ PROVIDERS = {
     },
 }
 # Preference order when the caller doesn't name a provider
-PREFERENCE = ["groq", "openrouter", "openai", "anthropic", "deepseek", "glm", "kimi", "ollama"]
+PREFERENCE = ["groq", "openrouter", "openai", "anthropic", "deepseek", "glm", "kimi", "ollama", "opencode"]
 
 MAX_CONTEXT_CHARS = 48000
 

@@ -676,9 +676,336 @@ def download_article(url, did):
         with downloads_lock:
             downloads[did].update({'status': 'error', 'error': str(e), 'message': f'Error: {e}'})
 
+
+# ── Conversation parsers ────────────────────────────────────────────
+def parse_chatgpt_json(data):
+    conv = None
+    if isinstance(data, dict):
+        if "props" in data and "pageProps" in data:
+            page_props = data["props"]["pageProps"]
+            conv = page_props.get("sharedConversation") or page_props.get("conversation")
+        elif "mapping" in data:
+            conv = data
+        elif "sharedConversation" in data:
+            conv = data["sharedConversation"]
+        
+    if not conv or "mapping" not in conv:
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict) and "mapping" in data[0]:
+            conv = data[0]
+        else:
+            return None
+
+    title = conv.get("title") or "ChatGPT Conversation"
+    mapping = conv.get("mapping", {})
+    current_node_id = conv.get("current_node")
+    
+    path = []
+    node_id = current_node_id
+    visited = set()
+    while node_id and node_id in mapping and node_id not in visited:
+        visited.add(node_id)
+        path.append(node_id)
+        node_id = mapping[node_id].get("parent")
+    path.reverse()
+    
+    if not path:
+        nodes_with_time = []
+        for nid, node in mapping.items():
+            msg = node.get("message")
+            if msg:
+                create_time = msg.get("create_time") or 0
+                nodes_with_time.append((create_time, nid))
+        nodes_with_time.sort()
+        path = [nid for _, nid in nodes_with_time]
+        
+    md_lines = []
+    md_lines.append(f"# {title}\n")
+    
+    for nid in path:
+        node = mapping.get(nid)
+        if not node:
+            continue
+        msg = node.get("message")
+        if not msg:
+            continue
+        author = msg.get("author", {})
+        role = author.get("role", "unknown")
+        content = msg.get("content", {})
+        parts = content.get("parts", [])
+        
+        text_parts = []
+        for part in parts:
+            if isinstance(part, str):
+                text_parts.append(part)
+            elif isinstance(part, dict) and "text" in part:
+                text_parts.append(part["text"])
+        
+        text = "\n".join(text_parts).strip()
+        if not text:
+            continue
+            
+        role_label = role.capitalize()
+        if role == "user":
+            role_label = "User"
+        elif role == "assistant":
+            role_label = "Assistant"
+            
+        md_lines.append(f"### {role_label}\n{text}\n")
+        
+    return title, "\n".join(md_lines)
+
+
+def parse_json_conversation(text):
+    try:
+        data = json.loads(text.strip())
+    except Exception:
+        return None
+        
+    res = parse_chatgpt_json(data)
+    if res:
+        return res
+        
+    messages = None
+    title = "JSON Conversation"
+    if isinstance(data, list):
+        messages = data
+    elif isinstance(data, dict):
+        if "messages" in data and isinstance(data["messages"], list):
+            messages = data["messages"]
+            title = data.get("title") or title
+        elif "turns" in data and isinstance(data["turns"], list):
+            messages = data["turns"]
+            title = data.get("title") or title
+            
+    if messages:
+        md_lines = []
+        md_lines.append(f"# {title}\n")
+        first_user = None
+        
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role") or msg.get("author") or "unknown"
+            if isinstance(role, dict):
+                role = role.get("role") or "unknown"
+            role = str(role).lower()
+            
+            content = msg.get("content") or msg.get("text") or ""
+            if isinstance(content, dict):
+                parts = content.get("parts")
+                if parts and isinstance(parts, list):
+                    content = "\n".join([str(p) for p in parts if p])
+                else:
+                    content = content.get("text") or ""
+            
+            content = str(content).strip()
+            if not content:
+                continue
+                
+            role_label = role.capitalize()
+            if role in ("user", "human"):
+                role_label = "User"
+                if not first_user:
+                    first_user = content
+            elif role in ("assistant", "ai", "bot"):
+                role_label = "Assistant"
+            elif role == "system":
+                role_label = "System"
+                
+            md_lines.append(f"### {role_label}\n{content}\n")
+            
+        if first_user and title == "JSON Conversation":
+            title = first_user.split('\n')[0]
+            if len(title) > 60:
+                title = title[:57] + "..."
+            md_lines[0] = f"# {title}\n"
+            
+        return title, "\n".join(md_lines)
+        
+    return None
+
+
+def parse_raw_text_conversation(text):
+    lines = text.split('\n')
+    prefix_pat = re.compile(
+        r'^(\[?(user|assistant|human|ai|system|me|bot|speaker\s*\d+)\]?\s*:|^\[(user|assistant|human|ai|system|me|bot|speaker\s*\d+)\]\s*$)',
+        re.IGNORECASE
+    )
+    
+    turns = []
+    current_role = None
+    current_content = []
+    
+    for line in lines:
+        stripped = line.strip()
+        match = prefix_pat.match(stripped)
+        if match:
+            if current_role and current_content:
+                turns.append((current_role, "\n".join(current_content).strip()))
+            
+            role = None
+            content_start = ""
+            if match.group(2):
+                role = match.group(2).lower()
+                colon_idx = line.find(':')
+                if colon_idx != -1:
+                    content_start = line[colon_idx+1:]
+            elif match.group(3):
+                role = match.group(3).lower()
+                content_start = ""
+            
+            if not role:
+                role = "unknown"
+                
+            if "user" in role or role in ("human", "me"):
+                current_role = "User"
+            elif "assistant" in role or role in ("ai", "bot"):
+                current_role = "Assistant"
+            elif "system" in role:
+                current_role = "System"
+            else:
+                current_role = role.capitalize()
+                
+            current_content = [content_start]
+        else:
+            if current_role is not None:
+                current_content.append(line)
+                
+    if current_role and current_content:
+        turns.append((current_role, "\n".join(current_content).strip()))
+        
+    if not turns:
+        return None
+        
+    title = "Pasted Conversation"
+    for role, content in turns:
+        if role == "User" and content:
+            title = content.split('\n')[0].strip()
+            if len(title) > 60:
+                title = title[:57] + "..."
+            break
+            
+    md_lines = []
+    md_lines.append(f"# {title}\n")
+    for role, content in turns:
+        md_lines.append(f"### {role}\n{content}\n")
+        
+    return title, "\n".join(md_lines)
+
+
+def fetch_conversation_url(url):
+    req = Request(
+        url,
+        headers={
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        }
+    )
+    with urlopen(req, timeout=15) as r:
+        return r.read().decode('utf-8', errors='ignore')
+
+
+def download_conversation(url, did):
+    temp_dir = tempfile.mkdtemp(dir=TEMP_ROOT, prefix="conv_")
+    with downloads_lock:
+        downloads[did] = {
+            'status': 'starting', 'phase': 'init', 'type': 'conversation',
+            'progress': '0', 'speed': 'N/A', 'eta': 'N/A',
+            'size': 'N/A', 'downloaded': 'N/A',
+            'filename': None, 'error': None, 'message': 'Parsing conversation...',
+            'temp_dir': temp_dir,
+        }
+
+    try:
+        with downloads_lock:
+            downloads[did].update({'status': 'fetching', 'phase': 'fetching', 'message': 'Parsing content...'})
+
+        is_url = url.startswith('http://') or url.startswith('https://')
+        title = None
+        markdown_content = None
+        
+        if is_url:
+            with downloads_lock:
+                downloads[did].update({'message': 'Fetching conversation from link...'})
+            try:
+                html_data = fetch_conversation_url(url)
+                if 'chatgpt.com/share' in url or 'chat.openai.com/share' in url:
+                    match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html_data, re.DOTALL)
+                    if match:
+                        parsed_json = json.loads(match.group(1))
+                        res = parse_chatgpt_json(parsed_json)
+                        if res:
+                            title, markdown_content = res
+                
+                if not markdown_content:
+                    title_match = re.search(r'<title>(.*?)</title>', html_data, re.IGNORECASE | re.DOTALL)
+                    title = html.unescape(title_match.group(1).strip()) if title_match else "Shared Chat"
+                    text = re.sub(r'<(script|style).*?>.*?</\1>', '', html_data, flags=re.DOTALL|re.IGNORECASE)
+                    text = re.sub(r'<[^>]*>', ' ', text)
+                    text = html.unescape(text)
+                    lines = [line.strip() for line in text.split('\n') if line.strip()]
+                    markdown_content = f"# {title}\n\n" + "\n\n".join(lines)
+            except Exception as e:
+                raise Exception(
+                    f"Could not fetch conversation URL ({e}). "
+                    "OpenAI/Claude access controls may block automated scrapers. "
+                    "Please copy and paste the chat transcript text directly instead!"
+                )
+        else:
+            res = parse_json_conversation(url)
+            if not res:
+                res = parse_raw_text_conversation(url)
+                
+            if res:
+                title, markdown_content = res
+            else:
+                title = "Pasted Conversation"
+                lines = [l.strip() for l in url.split('\n') if l.strip()]
+                if lines:
+                    title_candidate = lines[0]
+                    if len(title_candidate) > 60:
+                        title = title_candidate[:57] + "..."
+                    else:
+                        title = title_candidate
+                markdown_content = f"# {title}\n\n{url}"
+
+        if not markdown_content:
+            raise Exception("Failed to parse conversation content.")
+
+        safe_title = sanitize_filename(title)
+        if not safe_title:
+            safe_title = "conversation"
+        filename = f"{safe_title}.md"
+        filepath = os.path.join(temp_dir, filename)
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(markdown_content)
+            
+        with downloads_lock:
+            downloads[did].update({
+                'status': 'complete',
+                'phase': 'ready',
+                'progress': '100',
+                'filepath': filepath,
+                'filename': filename,
+                'title': title,
+                'type': 'conversation',
+                'message': 'Parsed successfully'
+            })
+    except Exception as e:
+        with downloads_lock:
+            downloads[did].update({
+                'status': 'error',
+                'error': str(e),
+                'message': str(e)
+            })
+
+
 # ── Provider registry ───────────────────────────────────────────────
 # Each resource type is a provider. detect() ranks them by URL; new types
 # are added in providers.py without touching the server below.
+providers.register(providers.ConversationProvider(download_conversation))
 providers.register(providers.ArticleProvider(download_article))
 providers.register(providers.VideoProvider(download_video))
 
@@ -738,6 +1065,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "form-action 'self'"
         )
         self.send_header('Content-Security-Policy', csp)
+        # CORS — allow the GitHub Pages frontend to call this API
+        allowed = os.environ.get('CORS_ORIGINS', '*')
+        self.send_header('Access-Control-Allow-Origin', allowed)
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Max-Age', '86400')
 
     def serve_static(self, path):
         # Only allow files from the static/ directory
@@ -763,6 +1096,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_security_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_security_headers()
+        self.end_headers()
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -834,7 +1172,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 'providers': providers_avail,        # ready now via env / local
                 'connected': connected,              # user-added, key masked
                 'settings': settings,
-                'catalog': ['openai', 'anthropic', 'groq', 'openrouter', 'deepseek', 'glm', 'kimi', 'custom', 'ollama'],
+                'catalog': ['openai', 'anthropic', 'groq', 'openrouter', 'deepseek', 'glm', 'kimi', 'ollama', 'opencode', 'custom'],
                 'ready': bool(providers_avail) or bool(connected),
             })
             return
@@ -1012,7 +1350,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if path == '/api/download':
             length = int(self.headers.get('Content-Length', 0))
-            if length > 8192:
+            if length > 2 * 1024 * 1024:
                 self.send_json({'error': 'Request too large'}, 413)
                 return
             try:
@@ -1028,10 +1366,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             fmt = data.get('format', 'mp4')
             subtitles = bool(data.get('subtitles', False))
 
-            valid, err = validate_url(url)
-            if not valid:
-                self.send_json({'error': err}, 400)
-                return
+            is_conv = (dl_type == 'conversation')
+            if dl_type == 'auto':
+                prov = providers.detect(url)
+                if prov and prov.name == 'conversation':
+                    is_conv = True
+
+            if is_conv:
+                if not url:
+                    self.send_json({'error': 'Conversation content is empty'}, 400)
+                    return
+            else:
+                valid, err = validate_url(url)
+                if not valid:
+                    self.send_json({'error': err}, 400)
+                    return
 
             # Validate quality/format
             valid_q = {'2160p','1440p','1080p','720p','480p','360p','audio'}

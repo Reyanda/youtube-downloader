@@ -21,6 +21,9 @@ services:
         sync: false
       - key: OAUTH_REDIRECT_BASE
         sync: false
+      # CORS — restrict to your Pages domain in production; '*' for dev.
+      - key: CORS_ORIGINS
+        value: '*'
       # Google Drive sync (optional). Set these in the Render dashboard to
       # activate; leave unset and the Drive feature stays hidden/disabled.
       - key: GOOGLE_CLIENT_ID

@@ -17,6 +17,7 @@ auto-detection).
 """
 
 import re
+import json
 
 PROVIDERS = []
 
@@ -109,3 +110,63 @@ class ArticleProvider(Provider):
 
     def resolve(self, url, opts, did):
         self._resolver(url, did)
+
+
+def is_raw_conversation(text):
+    clean = text.strip()
+    # Check JSON
+    if (clean.startswith('{') and clean.endswith('}')) or (clean.startswith('[') and clean.endswith(']')):
+        try:
+            parsed = json.loads(clean)
+            if isinstance(parsed, list):
+                return True
+            if isinstance(parsed, dict) and ('messages' in parsed or 'conversation' in parsed or 'turns' in parsed or 'mapping' in parsed):
+                return True
+        except Exception:
+            pass
+
+    # Check text chat turns pattern
+    lines = [line.strip() for line in clean.split('\n') if line.strip()]
+    if len(lines) >= 2:
+        # Matches e.g. "User: hello" or "[User] Hello" or "[User]: hello"
+        turn_pattern = re.compile(
+            r'^(\[?(user|assistant|human|ai|system|me|bot|speaker\s*\d+)\]?\s*:|^\[(user|assistant|human|ai|system|me|bot|speaker\s*\d+)\]\s*$)',
+            re.IGNORECASE
+        )
+        match_count = 0
+        for line in lines[:10]:
+            if turn_pattern.match(line):
+                match_count += 1
+        if match_count >= 2:
+            return True
+    return False
+
+
+class ConversationProvider(Provider):
+    """ChatGPT / Claude share URLs or raw conversation text."""
+    name = "conversation"
+    aliases = ("chat", "transcript")
+
+    def __init__(self, resolver):
+        self._resolver = resolver
+
+    def matches(self, url):
+        u = url.lower().strip()
+        # Share links
+        if 'chatgpt.com/share' in u or 'chat.openai.com/share' in u:
+            return 100
+        if 'claude.ai/share' in u or 'claude.com/share' in u:
+            return 100
+        # Raw conversation
+        if is_raw_conversation(url):
+            return 95
+        # If it is not a URL and not a DOI, treat it as raw conversation
+        is_url = u.startswith('http://') or u.startswith('https://')
+        is_doi = re.search(r'^10\.\d{4,}/', u) or 'doi.org/10.' in u or 'dx.doi.org/10.' in u
+        if not is_url and not is_doi:
+            return 90
+        return 0
+
+    def resolve(self, url, opts, did):
+        self._resolver(url, did)
+
