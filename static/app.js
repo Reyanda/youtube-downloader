@@ -449,23 +449,34 @@
         return c;
     }
 
-    window.addConcept=function(label,terms){
+    function refreshOps(){
+        Array.prototype.forEach.call(document.querySelectorAll('#srConcepts .sr-concept'),function(r,i){
+            var op=r.querySelector('.sr-op'); if(op)op.style.visibility=(i===0?'hidden':'visible');
+        });
+    }
+    window.addConcept=function(label,terms,op){
         var wrap=document.getElementById('srConcepts');
         var row=document.createElement('div');row.className='sr-concept';
+        var opb=document.createElement('button');opb.className='sr-op';opb.type='button';
+        opb.setAttribute('data-op',op==='OR'?'OR':'AND');opb.textContent=opb.getAttribute('data-op');
+        opb.title='How this facet joins the one above (click to toggle AND / OR)';
+        opb.onclick=function(){var v=opb.getAttribute('data-op')==='AND'?'OR':'AND';opb.setAttribute('data-op',v);opb.textContent=v};
         var sel=document.createElement('select');sel.className='sr-label';
         sel.innerHTML=SR_LABELS.map(function(l){return '<option'+(l===label?' selected':'')+'>'+l+'</option>'}).join('');
         var rm=document.createElement('button');rm.className='sr-rm';rm.type='button';rm.title='Remove';rm.textContent='×';
-        rm.onclick=function(){row.remove()};
+        rm.onclick=function(){row.remove();refreshOps()};
+        row.appendChild(opb);
         row.appendChild(sel);
         row.appendChild(tagsContainer(terms,'exposures, locations… type each, press Enter'));
         row.appendChild(rm);
         wrap.appendChild(row);
+        refreshOps();
     };
     function collectConcepts(){
         var out=[];
-        Array.prototype.forEach.call(document.querySelectorAll('#srConcepts .sr-concept'),function(r){
+        Array.prototype.forEach.call(document.querySelectorAll('#srConcepts .sr-concept'),function(r,i){
             var terms=readTags(r.querySelector('.sr-tags'));
-            if(terms.length)out.push({label:r.querySelector('.sr-label').value,terms:terms});
+            if(terms.length){var ob=r.querySelector('.sr-op');out.push({label:r.querySelector('.sr-label').value,terms:terms,op:(i===0?'AND':(ob?ob.getAttribute('data-op'):'AND'))})}
         });
         return out;
     }

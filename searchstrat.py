@@ -121,6 +121,22 @@ def _cochrane_block(descriptors, free):
     return "(" + " OR ".join(parts) + ")"
 
 
+def _combine(blocks, ops, nl=True, lower=False):
+    """Join facet blocks with per-junction operators. Flat join when all
+    operators match; explicit left-to-right nesting when they're mixed (so
+    AND/OR precedence is never ambiguous)."""
+    if not blocks:
+        return ""
+    def sep(op):
+        return f"\n{op}\n" if nl else (f" {op.lower()} " if lower else f" {op} ")
+    if len(set(ops)) <= 1:
+        return sep(ops[0] if ops else "AND").join(blocks)
+    expr = blocks[0]
+    for i in range(1, len(blocks)):
+        expr = "(" + expr + sep(ops[i - 1]) + blocks[i] + ")"
+    return expr
+
+
 def build(concepts, exclude=None):
     """Build database-specific strategies from PRISM facet blocks.
 
@@ -133,15 +149,19 @@ def build(concepts, exclude=None):
         descriptors, free = _concept_terms(c)
         if not (descriptors or free):
             continue
+        op = str(c.get("op", "AND")).upper()
+        if op not in ("AND", "OR"):
+            op = "AND"
         resolved.append({"label": c.get("label", ""), "descriptors": descriptors,
-                         "free": free})
+                         "free": free, "op": op})
     excl = [str(t).strip() for t in (exclude or []) if str(t).strip()]
     if not resolved:
         return {"concepts": [], "exclude": excl, "pubmed": "", "ovid": "", "cochrane": ""}
 
-    pubmed = "\nAND\n".join(_pubmed_block(c["descriptors"], c["free"]) for c in resolved)
-    ovid = " and ".join(_ovid_block(c["descriptors"], c["free"]) for c in resolved)
-    cochrane = "\nAND\n".join(_cochrane_block(c["descriptors"], c["free"]) for c in resolved)
+    ops = [c["op"] for c in resolved[1:]]   # operator joining facet i to i-1
+    pubmed = _combine([_pubmed_block(c["descriptors"], c["free"]) for c in resolved], ops, nl=True)
+    ovid = _combine([_ovid_block(c["descriptors"], c["free"]) for c in resolved], ops, nl=False, lower=True)
+    cochrane = _combine([_cochrane_block(c["descriptors"], c["free"]) for c in resolved], ops, nl=True)
     if excl:
         pubmed += "\nNOT\n(" + " OR ".join(f'{_phrase(t)}[tiab]' for t in excl) + ")"
         ovid += " not (" + " or ".join(f'{t}.ti,ab.' for t in excl) + ")"

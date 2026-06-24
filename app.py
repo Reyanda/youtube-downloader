@@ -1552,7 +1552,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             for c in (concepts or [])[:8]:
                 terms = [str(t).strip()[:80] for t in (c.get('terms') or []) if str(t).strip()][:8]
                 if terms:
-                    clean.append({'label': str(c.get('label', ''))[:40], 'terms': terms})
+                    op = str(c.get('op', 'AND')).upper()
+                    clean.append({'label': str(c.get('label', ''))[:40], 'terms': terms,
+                                  'op': op if op in ('AND', 'OR') else 'AND'})
             if not clean:
                 self.send_json({'error': 'No usable facets'}, 400)
                 return

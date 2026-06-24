@@ -300,6 +300,9 @@ body { font-family: var(--font-body); background: var(--bg); color: var(--fg); m
 .sr-builder { max-width: 640px; margin: 0 auto; }
 .sr-concepts { display: flex; flex-direction: column; gap: 8px; }
 .sr-concept { display: flex; gap: 8px; align-items: center; }
+.sr-op { flex-shrink: 0; width: 48px; padding: 8px 0; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: var(--muted); cursor: pointer; font-family: var(--font-body); }
+.sr-op:hover { color: var(--fg); border-color: var(--border-strong); }
+.sr-op[data-op="OR"] { color: var(--fg); border-color: var(--border-strong); background: var(--card); }
 .sr-label { flex-shrink: 0; width: 150px; padding: 11px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; font-size: 13px; font-family: var(--font-body); color: var(--fg); }
 .sr-terms { flex: 1; padding: 11px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; font-size: 14px; font-family: var(--font-body); color: var(--fg); }
 .sr-terms:focus, .sr-label:focus { outline: none; border-color: var(--border-strong); }
