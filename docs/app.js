@@ -61,7 +61,8 @@
         if(low.includes('arxiv.org'))return showT('arxiv','doc','arXiv Paper','Preprint');
         if(low.includes('pubmed')||low.includes('ncbi.nlm.nih.gov'))return showT('pubmed','doc','PubMed','Medical literature');
         if(/springer|wiley|sciencedirect|nature\.com|science\.org|ieee|acm/.test(low))return showT('academic','doc','Academic Article','Journal article');
-        if(low.includes('chatgpt.com/share')||low.includes('chat.openai.com/share')||low.includes('claude.ai/share')||low.includes('claude.com/share')||isRawConversation(u)) {
+        var isUrl = low.startsWith('http://') || low.startsWith('https://');
+        if(low.includes('chatgpt.com/share')||low.includes('chat.openai.com/share')||low.includes('claude.ai/share')||low.includes('claude.com/share')||isRawConversation(u)||!isUrl) {
             return showT('conversation','chat','Conversation','Chat share link or transcript');
         }
         showT('video','video','Video','YouTube, Vimeo, TikTok + 1000 more');
@@ -94,6 +95,8 @@
 
     window.startDownload=function(){
         var url=input.value.trim();if(!url)return;
+        clearTimeout(debounce);
+        det(url);
         var btn=document.getElementById('downloadBtn');
         btn.classList.add('loading');btn.disabled=true;
         document.getElementById('progressSection').classList.add('active');
