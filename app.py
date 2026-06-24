@@ -1029,9 +1029,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Length', len(body))
         if cookie:
             self.send_header('Set-Cookie', cookie)
-        self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('X-Frame-Options', 'DENY')
-        self.send_header('Referrer-Policy', 'no-referrer')
+        self.send_security_headers()
         self.end_headers()
         self.wfile.write(body)
 
