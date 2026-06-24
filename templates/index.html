@@ -22,6 +22,7 @@
         <div class="nav-links">
             <a href="#" class="nav-link" onclick="window.showMain();return false">Download</a>
             <a href="#" class="nav-link" onclick="window.showLibrary();return false">Library</a>
+            <a href="#" class="nav-link" onclick="window.showReview();return false">Review</a>
             <a href="#" class="nav-link nav-gear" onclick="window.openSettings();return false" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.8M12 18.7v2.8M21.5 12h-2.8M5.3 12H2.5M18.7 5.3l-2 2M7.3 16.7l-2 2M18.7 18.7l-2-2M7.3 7.3l-2-2"/></svg></a>
             <a href="https://github.com/Reyanda/resource-shrimp" target="_blank" rel="noopener" class="nav-link">GitHub</a>
         </div>
@@ -160,6 +161,27 @@
             </div>
             <div class="lib-grid" id="libList"></div>
             <div class="lib-empty" id="libEmpty" style="display:none">Nothing here yet — download something and it'll show up.</div>
+        </section>
+
+        <section class="review-view" id="reviewView" style="display:none">
+            <div class="library-head">
+                <h2>Search strategy</h2>
+                <p>Clean PICO/PECO in → PRESS-aligned, MeSH-grounded strategies out.</p>
+            </div>
+            <div class="sr-builder">
+                <div class="sr-concepts" id="srConcepts"></div>
+                <button class="sr-add" id="srAdd" onclick="window.addConcept()">+ Add concept</button>
+                <div class="sr-actions"><button class="drive-btn" id="srBuildBtn" onclick="window.buildStrategy()">Build strategy</button></div>
+                <details class="ask-key">
+                    <summary>Or paste a question (decompose with AI)</summary>
+                    <div class="sr-q-body">
+                        <textarea id="srQuestion" class="sr-q" placeholder="e.g. In children with severe acute malnutrition, does ready-to-use therapeutic food vs standard care improve recovery?"></textarea>
+                        <button class="drive-btn" onclick="window.buildFromQuestion()">Build from question</button>
+                    </div>
+                </details>
+                <div class="sr-msg" id="srMsg"></div>
+                <div class="sr-output" id="srOutput"></div>
+            </div>
         </section>
 
         <footer class="footer">

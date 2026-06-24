@@ -119,8 +119,10 @@
     function fmtSize(b){b=Number(b)||0;if(!b)return'';var u=['B','KB','MB','GB','TB'],i=0;while(b>=1024&&i<u.length-1){b/=1024;i++}return b.toFixed(i?1:0)+' '+u[i]}
     function mainEls(){return[document.querySelector('.hero'),document.querySelector('.input-card'),document.getElementById('progressSection'),document.getElementById('features')]}
 
-    window.showLibrary=function(){mainEls().forEach(function(e){if(e)e.style.display='none'});document.getElementById('libraryView').style.display='block';window.scrollTo(0,0);loadDrive();loadProjects();loadLibrary('')};
-    window.showMain=function(){document.getElementById('libraryView').style.display='none';mainEls().forEach(function(e){if(e&&e.id!=='progressSection')e.style.display=''})};
+    function hideViews(){document.getElementById('libraryView').style.display='none';var rv=document.getElementById('reviewView');if(rv)rv.style.display='none'}
+    window.showLibrary=function(){mainEls().forEach(function(e){if(e)e.style.display='none'});hideViews();document.getElementById('libraryView').style.display='block';window.scrollTo(0,0);loadDrive();loadProjects();loadLibrary('')};
+    window.showMain=function(){hideViews();mainEls().forEach(function(e){if(e&&e.id!=='progressSection')e.style.display=''})};
+    window.showReview=function(){mainEls().forEach(function(e){if(e)e.style.display='none'});hideViews();document.getElementById('reviewView').style.display='block';window.scrollTo(0,0);if(!document.querySelectorAll('#srConcepts .sr-concept').length){addConcept('Population');addConcept('Intervention/Exposure');addConcept('Outcome')}};
 
     function refreshLibIfOpen(){if(document.getElementById('libraryView').style.display==='block'){var s=document.getElementById('libSearch');loadLibrary(s?s.value.trim():'')}}
 
@@ -387,6 +389,56 @@
     function disconnectProvider(p){
         fetch('/api/ai/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:p})})
         .then(function(){loadSettings()});
+    }
+
+    // ── Systematic review: search-strategy builder ───────────────────
+    var SR_LABELS=['Population','Intervention/Exposure','Comparator','Outcome','Other'];
+    window.addConcept=function(label,terms){
+        var wrap=document.getElementById('srConcepts');
+        var row=document.createElement('div');row.className='sr-concept';
+        var opts=SR_LABELS.map(function(l){return '<option'+(l===label?' selected':'')+'>'+l+'</option>'}).join('');
+        row.innerHTML='<select class="sr-label">'+opts+'</select>'+
+            '<input class="sr-terms" placeholder="terms, comma-separated (e.g. malnutrition, wasting)" value="'+esc(terms||'')+'">'+
+            '<button class="sr-rm" title="Remove">×</button>';
+        row.querySelector('.sr-rm').onclick=function(){row.remove()};
+        wrap.appendChild(row);
+    };
+    function collectConcepts(){
+        var out=[];
+        Array.prototype.forEach.call(document.querySelectorAll('#srConcepts .sr-concept'),function(r){
+            var label=r.querySelector('.sr-label').value;
+            var terms=r.querySelector('.sr-terms').value.split(',').map(function(t){return t.trim()}).filter(Boolean);
+            if(terms.length)out.push({label:label,terms:terms});
+        });
+        return out;
+    }
+    function srMsg(t,cls){var m=document.getElementById('srMsg');m.textContent=t;m.className='sr-msg '+(cls||'')}
+    function postStrategy(body,btn){
+        if(btn){btn.disabled=true;btn.dataset.t=btn.textContent;btn.textContent='Building…'}
+        srMsg('Resolving MeSH + building…');
+        document.getElementById('srOutput').innerHTML='';
+        fetch('/api/search/strategy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+        .then(function(r){return r.json()})
+        .then(function(d){if(btn){btn.disabled=false;btn.textContent=btn.dataset.t}
+            if(d.error){srMsg(d.error,'err');return}srMsg('');renderStrategy(d)})
+        .catch(function(){if(btn){btn.disabled=false;btn.textContent=btn.dataset.t}srMsg('Request failed.','err')});
+    }
+    window.buildStrategy=function(){var c=collectConcepts();if(!c.length){srMsg('Add at least one concept with terms.','err');return}postStrategy({concepts:c},document.getElementById('srBuildBtn'))};
+    window.buildFromQuestion=function(e){var q=document.getElementById('srQuestion').value.trim();if(!q){srMsg('Type a question first.','err');return}postStrategy({question:q})};
+    function renderStrategy(d){
+        var out=document.getElementById('srOutput');
+        var blocks=[['PubMed',d.pubmed],['Ovid MEDLINE / Embase',d.ovid],['Cochrane CENTRAL',d.cochrane]];
+        var resolved=(d.concepts||[]).map(function(c){
+            var mesh=(c.descriptors||[]).join(', ');
+            return '<div class="sr-concept-tag"><b>'+esc(c.label||'')+'</b>'+(mesh?(' · MeSH: '+esc(mesh)):' · no MeSH match (free-text only)')+'</div>';
+        }).join('');
+        out.innerHTML='<div class="sr-resolved">'+resolved+'</div>'+
+            blocks.map(function(b,i){return '<div class="sr-block"><div class="sr-block-head"><span>'+esc(b[0])+'</span><button class="lib-btn sr-copy" data-i="'+i+'">Copy</button></div><pre class="sr-pre">'+esc(b[1]||'')+'</pre></div>'}).join('')+
+            (d.note?('<div class="sr-note">'+esc(d.note)+'</div>'):'');
+        Array.prototype.forEach.call(out.querySelectorAll('.sr-copy'),function(btn){btn.onclick=function(){
+            var txt=blocks[+btn.getAttribute('data-i')][1]||'';
+            if(navigator.clipboard)navigator.clipboard.writeText(txt).then(function(){btn.textContent='Copied';setTimeout(function(){btn.textContent='Copy'},1200)});
+        }});
     }
 
     // React to the OAuth redirect landing back on the page

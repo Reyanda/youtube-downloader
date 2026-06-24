@@ -25,6 +25,7 @@ import providers
 import library
 import gdrive
 import ai
+import searchstrat
 import vault as _vault_mod
 
 PORT = int(os.environ.get("PORT", 8080))
@@ -1501,7 +1502,62 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'error': str(e)}, 502)
             return
 
+        # ── Systematic review: search-strategy builder (PRESS / MeSH) ──
+        if path == '/api/search/strategy':
+            data = self.read_json_body(max_len=16384)
+            if data is None:
+                return
+            sid = get_session(self)
+            concepts = data.get('concepts')
+            # If no concepts, decompose a free-text question with the LLM
+            if not concepts:
+                question = (data.get('question') or '').strip()
+                if not question or len(question) > 2000:
+                    self.send_json({'error': 'Provide PICO concepts or a question'}, 400)
+                    return
+                provider, key, model, base_url = self._resolve_ai(sid, data)
+                try:
+                    chat_fn = lambda msgs: ai.chat(msgs, provider=provider, key=key,
+                                                   model=model, base_url=base_url)
+                    concepts = searchstrat.concepts_from_question(question, chat_fn)
+                except Exception as e:
+                    self.send_json({'error': f'Could not decompose question: {e}'}, 502)
+                    return
+            # Sanitise concepts (bound counts + lengths)
+            clean = []
+            for c in (concepts or [])[:6]:
+                terms = [str(t).strip()[:80] for t in (c.get('terms') or []) if str(t).strip()][:6]
+                if terms:
+                    clean.append({'label': str(c.get('label', ''))[:40], 'terms': terms})
+            if not clean:
+                self.send_json({'error': 'No usable concepts'}, 400)
+                return
+            try:
+                self.send_json(searchstrat.build(clean))
+            except Exception as e:
+                self.send_json({'error': f'Strategy build failed: {e}'}, 502)
+            return
+
         self.send_error(404)
+
+    def _resolve_ai(self, sid, data):
+        """Resolve (provider, key, model, base_url) from request + saved settings."""
+        provider = data.get('provider') or None
+        key = data.get('key') or None
+        model = data.get('model') or None
+        base_url = data.get('base_url') or None
+        settings = library.get_settings(sid) if sid else {}
+        if not provider:
+            provider = settings.get('default_provider') or None
+        if provider and provider in ai.PROVIDERS and sid:
+            cred = library.get_credential(sid, provider)
+            if cred:
+                key = key or cred.get('api_key')
+                base_url = base_url or cred.get('base_url')
+                model = model or cred.get('model')
+        if not model:
+            model = settings.get('default_model') or None
+        return provider, key, model, base_url
 
     def _run_provider(self, provider, url, opts, did, session):
         global ACTIVE_DOWNLOADS
