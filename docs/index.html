@@ -675,7 +675,11 @@
                     await downloadPaper(url);
                 }
             } catch (err) {
-                showStatus('error', err.message || 'Something went wrong');
+                const msg = typeof err === 'string' ? err :
+                           err?.message ? err.message :
+                           typeof err === 'object' ? JSON.stringify(err) :
+                           'Something went wrong';
+                showStatus('error', msg);
             }
 
             btn.classList.remove('loading');
@@ -693,67 +697,91 @@
                 '720p': '720', '480p': '480', '360p': '360'
             };
 
-            let downloadFormat = 'mp4';
             let videoQuality = qualityMap[quality] || '1080';
+            let isAudioOnly = audioMode === 'audio' || quality === 'audio';
 
-            if (audioMode === 'audio' || quality === 'audio') {
-                downloadFormat = audioFmt || 'mp3';
-                videoQuality = 'max';
-            }
+            // Try multiple Cobalt instances
+            const instances = [
+                'https://api.cobalt.tools',
+                'https://cobalt-api.kwiatekmiki.com',
+                'https://co.wuk.sh'
+            ];
 
-            try {
-                const res = await fetch(`${COBALT_API}/`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                    body: JSON.stringify({
+            let lastError = null;
+
+            for (const instance of instances) {
+                try {
+                    showStatus('loading', `Trying ${new URL(instance).hostname}...`);
+
+                    const body = {
                         url: url,
-                        downloadMode: audioMode === 'audio' ? 'audio' : 'auto',
-                        audioFormat: audioMode === 'audio' ? (audioFmt || 'mp3') : undefined,
-                        videoQuality: videoQuality,
+                        videoQuality: isAudioOnly ? 'max' : videoQuality,
                         filenameStyle: 'basic'
-                    })
-                });
+                    };
 
-                const data = await res.json();
+                    if (isAudioOnly) {
+                        body.downloadMode = 'audio';
+                        body.audioFormat = audioFmt || 'mp3';
+                    }
 
-                if (data.url) {
-                    setPhase('ready');
-                    showStatus('success', 'Download ready — saving to your device');
+                    const res = await fetch(`${instance}/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify(body)
+                    });
 
-                    // Trigger download
-                    const a = document.createElement('a');
-                    a.href = data.url;
-                    a.download = data.filename || 'download';
-                    a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
-                    setTimeout(() => a.remove(), 5000);
+                    const data = await res.json();
 
-                    updateProgress({ progress: '100', speed: '—', eta: '—', status: 'complete' });
-                } else if (data.error) {
-                    throw new Error(data.error.message || data.error);
-                } else {
-                    throw new Error('No download URL received');
-                }
-            } catch (err) {
-                // If Cobalt fails, try alternative approach
-                if (err.message.includes('fetch')) {
-                    showStatus('loading', 'Trying alternative method...');
-                    await downloadVideoFallback(url);
-                } else {
-                    throw err;
+                    // Handle different response formats
+                    if (data.url) {
+                        // Direct URL response
+                        setPhase('ready');
+                        showStatus('success', 'Download ready — saving to your device');
+                        triggerFileDownload(data.url, data.filename || 'download');
+                        updateProgress({ progress: '100', speed: '—', eta: '—', status: 'complete' });
+                        return;
+                    } else if (data.status === 'tunnel' || data.status === 'redirect') {
+                        // Tunnel/redirect response
+                        setPhase('ready');
+                        showStatus('success', 'Download ready — saving to your device');
+                        triggerFileDownload(data.url, 'download');
+                        updateProgress({ progress: '100', speed: '—', eta: '—', status: 'complete' });
+                        return;
+                    } else if (data.error) {
+                        lastError = data.error.message || data.error || JSON.stringify(data.error);
+                        continue;
+                    } else {
+                        lastError = 'Unexpected response format';
+                        continue;
+                    }
+                } catch (e) {
+                    lastError = e.message;
+                    continue;
                 }
             }
+
+            // All instances failed - open Cobalt in new tab as fallback
+            showStatus('loading', 'Opening Cobalt in new tab...');
+            setPhase('ready');
+
+            window.open('https://cobalt.tools/', '_blank');
+            showStatus('success', 'Paste your URL in Cobalt to download');
+            updateProgress({ progress: '100', speed: '—', eta: '—', status: 'complete' });
         }
 
-        async function downloadVideoFallback(url) {
-            // Alternative: use a redirect-based approach
-            showStatus('loading', 'Opening download page...');
-
-            // Create a helper page that explains manual download
-            const helperUrl = `https://www.y2mate.com/youtube/${encodeURIComponent(url)}`;
-            window.open('https://cobalt.tools/', '_blank');
-            showStatus('success', 'Opened Cobalt — paste your URL there');
+        function triggerFileDownload(url, filename) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => a.remove(), 5000);
         }
 
         // ========== PAPER DOWNLOAD (OpenAlex + Unpaywall) ==========
