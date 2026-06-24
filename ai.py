@@ -14,6 +14,8 @@ import mimetypes
 import os
 import re
 import secrets
+import time
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 # ── Providers ───────────────────────────────────────────────────────
@@ -133,8 +135,17 @@ def list_models(provider, key=None, base_url=None):
                       headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"})
     else:
         req = Request(base + "/models", headers={"Authorization": f"Bearer {api_key}"})
-    with urlopen(req, timeout=20) as r:
-        data = json.loads(r.read())
+    data = None
+    for attempt in range(3):
+        try:
+            with urlopen(req, timeout=20) as r:
+                data = json.loads(r.read())
+            break
+        except HTTPError as e:
+            if e.code == 429 and attempt < 2:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
     items = data.get("data") or data.get("models") or []
     out = []
     for it in items:
