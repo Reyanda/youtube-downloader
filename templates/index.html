@@ -17,7 +17,9 @@
             <span class="nav-logo-text">Resource Shrimp</span>
         </a>
         <div class="nav-links">
-            <a href="#features" class="nav-link">Features</a>
+            <a href="#" class="nav-link" onclick="window.showMain();return false">Download</a>
+            <a href="#" class="nav-link" onclick="window.showLibrary();return false">Library</a>
+            <a href="#" class="nav-link" onclick="window.openSettings();return false" title="Settings">⚙</a>
             <a href="https://github.com/Reyanda/resource-shrimp" target="_blank" rel="noopener" class="nav-link">GitHub</a>
         </div>
     </nav>
@@ -115,23 +117,86 @@
             </div>
         </div>
 
-        <section class="features" id="features">
-            <h2>Everything you need</h2>
-            <p>One tool for all your downloads</p>
-            <div class="feature-grid">
-                <div class="feature-card"><div class="feature-icon">🎬</div><div class="feature-title">1000+ Sites</div><div class="feature-desc">YouTube, Vimeo, TikTok, Twitter, Instagram via yt-dlp.</div></div>
-                <div class="feature-card"><div class="feature-icon">📑</div><div class="feature-title">Academic Papers</div><div class="feature-desc">OpenAlex + Sci-Hub + Research4Life for free access.</div></div>
-                <div class="feature-card"><div class="feature-icon">🎵</div><div class="feature-title">Lossless Audio</div><div class="feature-desc">FLAC, WAV, OPUS — studio quality, not just MP3.</div></div>
-                <div class="feature-card"><div class="feature-icon">⚡</div><div class="feature-title">Instant</div><div class="feature-desc">No sign-up. No ads. Paste URL, click download.</div></div>
+        <section class="library-view" id="libraryView" style="display:none">
+            <div class="library-head">
+                <h2>Your Library</h2>
+                <p>Everything you've downloaded, kept in your sandbox.</p>
+                <div class="drive-bar" id="driveBar" style="display:none"></div>
+                <div class="proj-bar" id="projBar"></div>
+                <input type="text" class="lib-search" id="libSearch" placeholder="Search your library..." oninput="window.searchLib(this.value)" autocomplete="off">
+
+                <div class="ask-panel" id="askPanel">
+                    <div class="ask-scope" id="askScope" style="display:none"></div>
+                    <div class="ask-row">
+                        <input type="text" class="ask-input" id="askInput" placeholder="Ask the AI about your library..." autocomplete="off" onkeydown="if(event.key==='Enter')window.askAI()">
+                        <button class="ask-btn" id="askBtn" onclick="window.askAI()">Ask</button>
+                    </div>
+                    <div class="ask-answer" id="askAnswer" style="display:none"></div>
+                    <details class="ask-key">
+                        <summary>AI provider &amp; key</summary>
+                        <div class="ask-key-body">
+                            <select id="askProvider" class="ask-select">
+                                <option value="">Auto (best available)</option>
+                                <option value="groq">Groq</option>
+                                <option value="openrouter">OpenRouter</option>
+                                <option value="ollama">Ollama (local)</option>
+                            </select>
+                            <input type="password" id="askKey" class="ask-keyinput" placeholder="Your API key (optional, kept in this browser only)" autocomplete="off">
+                        </div>
+                    </details>
+                </div>
             </div>
+            <div class="lib-grid" id="libList"></div>
+            <div class="lib-empty" id="libEmpty" style="display:none">Nothing here yet — download something and it'll show up.</div>
         </section>
 
         <footer class="footer">
             <div class="footer-links">
                 <a href="https://github.com/Reyanda/resource-shrimp" target="_blank" rel="noopener" class="footer-link">GitHub</a>
             </div>
-            <div class="footer-copy">Built by Reyanda. Files never leave your device.</div>
+            <div class="footer-copy">Built by Reyanda. Your files stay in your sandbox.</div>
         </footer>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)this.classList.remove('active')">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span class="modal-title">Settings</span>
+                <button class="modal-close" onclick="document.getElementById('settingsModal').classList.remove('active')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="set-section">
+                    <div class="set-label">Default AI provider</div>
+                    <div class="set-row">
+                        <select id="setProvider" class="ask-select"></select>
+                        <input id="setModel" class="ask-keyinput" placeholder="Default model (optional)" autocomplete="off">
+                    </div>
+                    <button class="drive-btn" onclick="window.saveSettings()">Save defaults</button>
+                </div>
+                <div class="set-section">
+                    <div class="set-label">Connected providers</div>
+                    <div id="setConnected" class="set-connected"></div>
+                </div>
+                <div class="set-section">
+                    <div class="set-label">Add a provider (API key)</div>
+                    <div class="set-grid">
+                        <select id="addProvider" class="ask-select" onchange="window.onAddProvider()">
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic (Claude)</option>
+                            <option value="groq">Groq</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="custom">Custom (OpenAI-compatible)</option>
+                        </select>
+                        <input id="addKey" class="ask-keyinput" type="password" placeholder="API key" autocomplete="off">
+                        <input id="addModel" class="ask-keyinput" placeholder="Model (optional)" autocomplete="off">
+                        <input id="addBase" class="ask-keyinput" placeholder="Base URL (custom only)" autocomplete="off" style="display:none">
+                    </div>
+                    <button class="drive-btn" onclick="window.connectProvider()">Connect</button>
+                    <div id="addMsg" class="set-msg"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Institution Modal -->

@@ -2,8 +2,16 @@ services:
   - type: web
     name: resource-shrimp
     runtime: python
-    buildCommand: pip install yt-dlp
+    buildCommand: pip install -r requirements.txt
     startCommand: python app.py
     envVars:
       - key: PORT
         value: 8080
+      # Google Drive sync (optional). Set these in the Render dashboard to
+      # activate; leave unset and the Drive feature stays hidden/disabled.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: OAUTH_REDIRECT_BASE
+        sync: false

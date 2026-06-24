@@ -14,15 +14,25 @@ import threading
 import time
 import hashlib
 import secrets
+import html
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs, quote, unquote
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 import mimetypes
+import http.cookies
+import providers
+import library
+import gdrive
+import ai
+import vault as _vault_mod
 
 PORT = int(os.environ.get("PORT", 8080))
 BASE = os.path.dirname(os.path.abspath(__file__))
 TEMP_ROOT = tempfile.mkdtemp(prefix="rshrimp_")
+
+# Persistent per-user library (sandbox + searchable index)
+library.init()
 
 # ── In-memory state (replaces Flask globals) ────────────────────────
 downloads = {}          # id -> dict
@@ -32,18 +42,139 @@ MAX_CONCURRENT = 5
 MAX_URL_LEN = 2048
 
 # ── Rate limiter ────────────────────────────────────────────────────
-_rate = {}  # ip -> [timestamps]
-RATE_LIMIT = 10          # requests per window
+# Separate buckets: reads (status polling + library browsing) need a high
+# ceiling; starting a new download is the expensive action and stays tight.
+_rate = {}  # (bucket, ip) -> [timestamps]
+RATE_LIMIT = 600         # read requests per window (status polling + browsing)
 RATE_WINDOW = 60         # seconds
+DOWNLOAD_LIMIT = 20      # new downloads per window
 
-def rate_check(ip):
+def rate_check(ip, bucket="read", limit=RATE_LIMIT, window=RATE_WINDOW):
     now = time.time()
-    _rate.setdefault(ip, [])
-    _rate[ip] = [t for t in _rate[ip] if now - t < RATE_WINDOW]
-    if len(_rate[ip]) >= RATE_LIMIT:
+    key = (bucket, ip)
+    _rate.setdefault(key, [])
+    _rate[key] = [t for t in _rate[key] if now - t < window]
+    if len(_rate[key]) >= limit:
         return False
-    _rate[ip].append(now)
+    _rate[key].append(now)
     return True
+
+# ── Session cookie (anonymous; becomes Google identity in Phase B) ──
+COOKIE_NAME = "rs_session"
+
+def get_session(handler):
+    raw = handler.headers.get("Cookie")
+    if raw:
+        try:
+            jar = http.cookies.SimpleCookie(raw)
+            if COOKIE_NAME in jar:
+                return sanitize_id(jar[COOKIE_NAME].value)
+        except Exception:
+            pass
+    return None
+
+def new_session():
+    return secrets.token_urlsafe(16)
+
+def session_cookie(sid):
+    return f"{COOKIE_NAME}={sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"
+
+# ── Google OAuth state (CSRF) + access-token helper ─────────────────
+_oauth_states = {}        # state -> (session, created_ts)
+_oauth_lock = threading.Lock()
+OAUTH_STATE_TTL = 600     # seconds
+
+def oauth_new_state(session):
+    state = secrets.token_urlsafe(24)
+    now = time.time()
+    with _oauth_lock:
+        # opportunistic prune of expired states
+        for s in [k for k, (_, ts) in _oauth_states.items() if now - ts > OAUTH_STATE_TTL]:
+            _oauth_states.pop(s, None)
+        _oauth_states[state] = (session, now)
+    return state
+
+def oauth_take_state(state):
+    """Consume a state token, returning its session or None."""
+    with _oauth_lock:
+        entry = _oauth_states.pop(state, None)
+    if not entry:
+        return None
+    session, ts = entry
+    if time.time() - ts > OAUTH_STATE_TTL:
+        return None
+    return session
+
+def google_access_token(session):
+    """Return a valid access token for the session, refreshing if needed."""
+    auth = library.get_google(session)
+    if not auth or not auth.get("access_token"):
+        return None
+    if auth.get("expiry", 0) > time.time() + 60:
+        return auth["access_token"]
+    # expired — refresh
+    if not auth.get("refresh_token"):
+        return None
+    try:
+        tok = gdrive.refresh(auth["refresh_token"])
+    except Exception as e:
+        print(f"[gdrive] refresh failed: {e}", file=sys.stderr)
+        return None
+    access = tok.get("access_token")
+    if not access:
+        return None
+    expiry = time.time() + int(tok.get("expires_in", 3600))
+    library.set_google(session, auth.get("email"), access,
+                       tok.get("refresh_token"), expiry)
+    return access
+
+# ── AI context building (Phase C) ───────────────────────────────────
+def ensure_resource_text(session, rid):
+    """Return cached/extracted text for a resource the session owns."""
+    cached = library.get_text(session, rid)
+    if cached:
+        return cached
+    rec = library.get(session, rid)
+    if not rec or not rec.get('filepath'):
+        return None
+    real = os.path.realpath(rec['filepath'])
+    if not real.startswith(os.path.realpath(library.LIBRARY_ROOT) + os.sep):
+        return None
+    text = ai.extract_text(real, rec.get('mime'))
+    if text:
+        library.set_text(rid, text)
+    return text
+
+def build_ai_context(session, rid, project=None):
+    """Return (context_string, [resource_ids_used]) for the model.
+
+    rid → one resource; project → that project's resources; else recent.
+    """
+    if rid:
+        rec = library.get(session, rid)
+        if not rec:
+            return "", []
+        text = ensure_resource_text(session, rid)
+        head = rec.get('title') or rec.get('filename') or rid
+        body = text or "(no extractable text in this resource)"
+        return f"# {head}\n{body[:ai.MAX_CONTEXT_CHARS]}", [rid]
+    # Project scope, or most recent resources, within a char budget
+    if project:
+        items = library.list_resources(session, project=project, limit=25)
+    else:
+        items = library.list_resources(session, limit=8)
+    used, chunks, total = [], [], 0
+    per, budget = 6000, ai.MAX_CONTEXT_CHARS
+    for it in items:
+        head = it.get('title') or it.get('filename') or it['id']
+        text = ensure_resource_text(session, it['id']) if it.get('filename') else None
+        block = f"# {head}\n{(text or '')[:per]}".strip()
+        if total + len(block) > budget:
+            break
+        chunks.append(block)
+        used.append(it['id'])
+        total += len(block)
+    return "\n\n---\n\n".join(chunks), used
 
 # ── URL validation ──────────────────────────────────────────────────
 ALLOWED_SCHEMES = {"http", "https"}
@@ -196,13 +327,16 @@ def fetch_arxiv(arxiv_url):
         data, code, _ = http_get(f"http://export.arxiv.org/api/query?id_list={aid}")
         if code == 200:
             t = data.decode('utf-8', errors='ignore')
-            title = re.search(r'<title>(.*?)</title>', t, re.DOTALL)
-            summary = re.search(r'<summary>(.*?)</summary>', t, re.DOTALL)
-            authors = re.findall(r'<name>(.*?)</name>', t)
+            # Parse the paper <entry>, not the feed header (which also has <title>)
+            entry = re.search(r'<entry>(.*?)</entry>', t, re.DOTALL)
+            block = entry.group(1) if entry else t
+            title = re.search(r'<title>(.*?)</title>', block, re.DOTALL)
+            summary = re.search(r'<summary>(.*?)</summary>', block, re.DOTALL)
+            authors = re.findall(r'<name>(.*?)</name>', block)
             return {
-                'title': title.group(1).strip() if title else 'Unknown',
-                'abstract': summary.group(1).strip() if summary else '',
-                'authors': authors,
+                'title': html.unescape(title.group(1).strip()) if title else 'Unknown',
+                'abstract': html.unescape(summary.group(1).strip()) if summary else '',
+                'authors': [html.unescape(a.strip()) for a in authors],
                 'pdf_url': f"https://arxiv.org/pdf/{aid}",
                 'url': f"https://arxiv.org/abs/{aid}",
             }
@@ -386,11 +520,16 @@ def download_article(url, did):
         title = paper_info.get('title', 'Paper')
         clean_title = sanitize_filename(title)[:100]
 
+        authorships = paper_info.get('authorships') or []
+        authors = [a.get('author', {}).get('display_name', '') for a in authorships[:10]]
+        if not authors and paper_info.get('authors'):
+            authors = list(paper_info['authors'])[:10]  # arXiv shape
+
         with downloads_lock:
             downloads[did].update({
                 'status': 'downloading', 'phase': 'fetching', 'message': 'Downloading paper...',
                 'title': title,
-                'authors': [a.get('author', {}).get('display_name', '') for a in paper_info.get('authorships', [])[:10]],
+                'authors': authors,
                 'doi': paper_info.get('doi', ''),
                 'journal': (paper_info.get('primary_location') or {}).get('source', {}).get('display_name', '') if paper_info.get('primary_location') else '',
                 'year': paper_info.get('publication_year', ''),
@@ -399,8 +538,11 @@ def download_article(url, did):
 
         if pdf_url:
             data, code, headers = http_get(pdf_url, timeout=30)
-            ct = headers.get('Content-Type', '').lower()
-            if code == 200 and ('pdf' in ct or pdf_url.lower().endswith('.pdf')):
+            ct = (headers.get('Content-Type') or '').lower()
+            # Detect a PDF by magic bytes — many hosts (e.g. arXiv) omit a
+            # reliable Content-Type and the URL may lack a .pdf suffix.
+            is_pdf = data[:5] == b'%PDF-' or 'pdf' in ct or pdf_url.lower().endswith('.pdf')
+            if code == 200 and data and is_pdf:
                 pdf_path = os.path.join(temp_dir, f"{clean_title}.pdf")
                 with open(pdf_path, 'wb') as f:
                     f.write(data)
@@ -427,21 +569,49 @@ def download_article(url, did):
         with downloads_lock:
             downloads[did].update({'status': 'error', 'error': str(e), 'message': f'Error: {e}'})
 
+# ── Provider registry ───────────────────────────────────────────────
+# Each resource type is a provider. detect() ranks them by URL; new types
+# are added in providers.py without touching the server below.
+providers.register(providers.ArticleProvider(download_article))
+providers.register(providers.VideoProvider(download_video))
+
 # ── HTTP request handler ────────────────────────────────────────────
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(f"[{time.strftime('%H:%M:%S')}] {args[0]}", file=sys.stderr)
 
-    def send_json(self, data, status=200):
+    def send_json(self, data, status=200, cookie=None):
         body = json.dumps(data).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', len(body))
+        if cookie:
+            self.send_header('Set-Cookie', cookie)
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.end_headers()
         self.wfile.write(body)
+
+    def read_json_body(self, max_len=8192):
+        """Read+parse a JSON request body, or send an error and return None."""
+        length = int(self.headers.get('Content-Length', 0))
+        if length > max_len:
+            self.send_json({'error': 'Request too large'}, 413)
+            return None
+        try:
+            return json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            self.send_json({'error': 'Invalid JSON'}, 400)
+            return None
+
+    def send_redirect(self, location, cookie=None):
+        self.send_response(302)
+        self.send_header('Location', location)
+        if cookie:
+            self.send_header('Set-Cookie', cookie)
+        self.send_header('Content-Length', 0)
+        self.end_headers()
 
     def send_security_headers(self):
         self.send_header('X-Content-Type-Options', 'nosniff')
@@ -473,10 +643,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ct = ct or 'application/octet-stream'
         with open(safe, 'rb') as f:
             body = f.read()
+        # Revalidate CSS/JS each load so users never get stale assets after a
+        # deploy; other static types can cache normally.
+        if safe.endswith(('.css', '.js')):
+            cache = 'no-cache'
+        else:
+            cache = 'public, max-age=3600'
         self.send_response(200)
         self.send_header('Content-Type', ct)
         self.send_header('Content-Length', len(body))
-        self.send_header('Cache-Control', 'public, max-age=3600')
+        self.send_header('Cache-Control', cache)
         self.send_security_headers()
         self.end_headers()
         self.wfile.write(body)
@@ -501,9 +677,95 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Content-Length', len(body))
+            if not get_session(self):
+                self.send_header('Set-Cookie', session_cookie(new_session()))
             self.send_security_headers()
             self.end_headers()
             self.wfile.write(body)
+            return
+
+        # Library listing (session-scoped, optional ?q= search)
+        if path == '/api/library':
+            sid = get_session(self)
+            if not sid:
+                self.send_json({'resources': []})
+                return
+            qs = parse_qs(parsed.query)
+            q = qs.get('q', [None])[0]
+            project = qs.get('project', [None])[0]
+            if project == 'unfiled':
+                project = '__none__'
+            items = library.list_resources(sid, q, project=project)
+            out = [{k: v for k, v in r.items() if k != 'filepath'} for r in items]
+            self.send_json({'resources': out})
+            return
+
+        if path == '/api/projects':
+            sid = get_session(self)
+            self.send_json({'projects': library.list_projects(sid) if sid else []})
+            return
+
+        # AI assistant availability + connected providers + settings
+        if path == '/api/ai/status':
+            sid = get_session(self)
+            providers_avail = ai.available()
+            connected = library.list_credentials(sid) if sid else []
+            settings = library.get_settings(sid) if sid else {'default_provider': None, 'default_model': None}
+            self.send_json({
+                'providers': providers_avail,        # ready now via env / local
+                'connected': connected,              # user-added, key masked
+                'settings': settings,
+                'catalog': ['openai', 'anthropic', 'groq', 'openrouter', 'custom', 'ollama'],
+                'ready': bool(providers_avail) or bool(connected),
+            })
+            return
+
+        # ── Google Drive (Phase B, optional) ────────────────────────
+        if path == '/api/auth/status':
+            sid = get_session(self)
+            auth = library.get_google(sid) if sid else None
+            self.send_json({
+                'configured': gdrive.configured(),
+                'connected': bool(auth and auth.get('refresh_token')),
+                'email': (auth or {}).get('email'),
+            })
+            return
+
+        if path == '/api/auth/google/start':
+            if not gdrive.configured():
+                self.send_json({'error': 'Google Drive not configured'}, 503)
+                return
+            sid = get_session(self)
+            set_cookie = None
+            if not sid:
+                sid = new_session()
+                set_cookie = session_cookie(sid)
+            state = oauth_new_state(sid)
+            self.send_redirect(gdrive.auth_url(state), cookie=set_cookie)
+            return
+
+        if path == '/api/auth/google/callback':
+            if not gdrive.configured():
+                self.send_json({'error': 'Google Drive not configured'}, 503)
+                return
+            qs = parse_qs(parsed.query)
+            code = qs.get('code', [None])[0]
+            state = qs.get('state', [None])[0]
+            sess_for_state = oauth_take_state(state) if state else None
+            if not code or not sess_for_state:
+                self.send_redirect('/?drive=error')
+                return
+            try:
+                tok = gdrive.exchange_code(code)
+                access = tok.get('access_token')
+                info = gdrive.userinfo(access) if access else {}
+                expiry = time.time() + int(tok.get('expires_in', 3600))
+                library.set_google(sess_for_state, info.get('email'),
+                                   access, tok.get('refresh_token'), expiry)
+                self.send_redirect('/?drive=connected')
+            except Exception as e:
+                print(f"[gdrive] callback failed: {e}", file=sys.stderr)
+                self.send_redirect('/?drive=error')
             return
 
         # Static files
@@ -518,7 +780,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'error': 'Invalid ID'}, 400)
                 return
             with downloads_lock:
-                info = downloads.get(did, {'status': 'not_found'})
+                info = downloads.get(did)
+            if info is None:
+                # Fall back to the persistent library (job pruned from memory)
+                sid = get_session(self)
+                rec = library.get(sid, did) if sid else None
+                if rec:
+                    info = {
+                        'status': 'complete', 'phase': 'ready', 'progress': '100',
+                        'type': rec['type'], 'filename': rec['filename'],
+                        'message': 'In library',
+                    }
+                    for k in ('title', 'authors', 'doi', 'journal', 'year'):
+                        if rec['meta'].get(k):
+                            info[k] = rec['meta'][k]
+                else:
+                    info = {'status': 'not_found'}
             # Strip internal fields
             safe_info = {k: v for k, v in info.items() if k not in ('temp_dir', 'filepath', 'url')}
             self.send_json(safe_info)
@@ -530,27 +807,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not did:
                 self.send_json({'error': 'Invalid ID'}, 400)
                 return
+
+            # Prefer the persistent library; fall back to an in-flight job.
+            filepath = filename = None
+            sid = get_session(self)
+            rec = library.get(sid, did) if sid else None
             with downloads_lock:
                 info = downloads.get(did)
-            if not info or info.get('status') != 'complete':
-                self.send_json({'error': 'File not ready'}, 404)
-                return
+            done = bool(rec) or bool(info and info.get('status') == 'complete')
+            if rec and rec.get('filepath'):
+                filepath, filename = rec['filepath'], rec['filename']
+            elif info and info.get('status') == 'complete':
+                filepath, filename = info.get('filepath'), info.get('filename')
 
-            filepath = info.get('filepath')
             if not filepath:
-                self.send_json({'error': 'No file path'}, 404)
+                # A completed item with no file = nothing to download
+                # (e.g. a paper found without an open-access PDF).
+                msg = 'No downloadable file for this item' if done else 'File not ready'
+                self.send_json({'error': msg}, 404)
                 return
 
-            # Path traversal check
+            # Path traversal check — file must live under the temp or library root
             real = os.path.realpath(filepath)
-            if not real.startswith(os.path.realpath(TEMP_ROOT)):
+            roots = (os.path.realpath(TEMP_ROOT), os.path.realpath(library.LIBRARY_ROOT))
+            if not any(real == r or real.startswith(r + os.sep) for r in roots):
                 self.send_json({'error': 'Access denied'}, 403)
                 return
             if not os.path.isfile(real):
                 self.send_json({'error': 'File not found'}, 404)
                 return
 
-            filename = sanitize_filename(info.get('filename', 'download'))
+            filename = sanitize_filename(filename or 'download')
             ct, _ = mimetypes.guess_type(filename)
             ct = ct or 'application/octet-stream'
             size = os.path.getsize(real)
@@ -564,16 +851,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             with open(real, 'rb') as f:
                 shutil.copyfileobj(f, self.wfile)
-
-            # Cleanup after streaming
-            try:
-                temp_dir = info.get('temp_dir')
-                if temp_dir and os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                with downloads_lock:
-                    downloads.pop(did, None)
-            except Exception:
-                pass
+            # No cleanup — the file lives in the user's library now.
             return
 
         self.send_error(404)
@@ -644,6 +922,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if fmt not in valid_f:
                 fmt = 'mp4'
 
+            # Per-IP limit on starting new downloads (the expensive action)
+            if not rate_check(ip, "download", DOWNLOAD_LIMIT):
+                self.send_json({'error': 'Download rate limit exceeded'}, 429)
+                return
+
             # Concurrency limit
             global ACTIVE_DOWNLOADS
             if ACTIVE_DOWNLOADS >= MAX_CONCURRENT:
@@ -651,33 +934,409 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             did = secrets.token_urlsafe(16)
-            url_type = detect_url_type(url) if dl_type == 'auto' else dl_type
+            if dl_type == 'auto':
+                provider = providers.detect(url)
+            else:
+                provider = providers.by_name(dl_type) or providers.detect(url)
+            if provider is None:
+                self.send_json({'error': 'No handler for this URL'}, 400)
+                return
+
+            sid = get_session(self)
+            set_cookie = None
+            if not sid:
+                sid = new_session()
+                set_cookie = session_cookie(sid)
 
             with downloads_lock:
                 ACTIVE_DOWNLOADS += 1
 
-            if url_type == 'video':
-                t = threading.Thread(target=self._run_video, args=(url, did, quality, subtitles, fmt), daemon=True)
-            else:
-                t = threading.Thread(target=self._run_article, args=(url, did), daemon=True)
+            opts = {'quality': quality, 'format': fmt, 'subtitles': subtitles}
+            t = threading.Thread(target=self._run_provider, args=(provider, url, opts, did, sid), daemon=True)
             t.start()
-            self.send_json({'download_id': did, 'type': url_type})
+            self.send_json({'download_id': did, 'type': provider.name}, cookie=set_cookie)
+            return
+
+        if path == '/api/delete':
+            length = int(self.headers.get('Content-Length', 0))
+            if length > 8192:
+                self.send_json({'error': 'Request too large'}, 413)
+                return
+            try:
+                data = json.loads(self.rfile.read(length))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self.send_json({'error': 'Invalid JSON'}, 400)
+                return
+            sid = get_session(self)
+            rid = sanitize_id(data.get('id', ''))
+            if not sid or not rid:
+                self.send_json({'error': 'Bad request'}, 400)
+                return
+            ok = library.delete(sid, rid)
+            with downloads_lock:
+                downloads.pop(rid, None)
+            self.send_json({'deleted': ok})
+            return
+
+        if path == '/api/auth/logout':
+            sid = get_session(self)
+            if sid:
+                library.clear_google(sid)
+            self.send_json({'ok': True})
+            return
+
+        if path == '/api/drive/sync':
+            if not gdrive.configured():
+                self.send_json({'error': 'Google Drive not configured'}, 503)
+                return
+            length = int(self.headers.get('Content-Length', 0))
+            if length > 8192:
+                self.send_json({'error': 'Request too large'}, 413)
+                return
+            try:
+                data = json.loads(self.rfile.read(length))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self.send_json({'error': 'Invalid JSON'}, 400)
+                return
+            sid = get_session(self)
+            rid = sanitize_id(data.get('id', ''))
+            if not sid or not rid:
+                self.send_json({'error': 'Bad request'}, 400)
+                return
+            rec = library.get(sid, rid)
+            if not rec or not rec.get('filepath'):
+                self.send_json({'error': 'No file to sync'}, 404)
+                return
+            access = google_access_token(sid)
+            if not access:
+                self.send_json({'error': 'Not connected to Google Drive'}, 401)
+                return
+            real = os.path.realpath(rec['filepath'])
+            if not real.startswith(os.path.realpath(library.LIBRARY_ROOT) + os.sep) \
+                    or not os.path.isfile(real):
+                self.send_json({'error': 'File unavailable'}, 404)
+                return
+            try:
+                folder = gdrive.ensure_folder(access)
+                meta = gdrive.upload(access, real, rec['filename'], folder,
+                                     rec.get('mime') or 'application/octet-stream')
+                self.send_json({'synced': True, 'drive_id': meta.get('id'),
+                                'name': meta.get('name')})
+            except Exception as e:
+                print(f"[gdrive] sync failed: {e}", file=sys.stderr)
+                self.send_json({'error': 'Drive upload failed'}, 502)
+            return
+
+        if path == '/api/ai/chat':
+            length = int(self.headers.get('Content-Length', 0))
+            if length > 16384:
+                self.send_json({'error': 'Request too large'}, 413)
+                return
+            try:
+                data = json.loads(self.rfile.read(length))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                self.send_json({'error': 'Invalid JSON'}, 400)
+                return
+            sid = get_session(self)
+            if not sid:
+                self.send_json({'error': 'No session'}, 400)
+                return
+            question = (data.get('question') or '').strip()
+            if not question or len(question) > 4000:
+                self.send_json({'error': 'Question missing or too long'}, 400)
+                return
+            rid = sanitize_id(data.get('id', '')) if data.get('id') else None
+            project = sanitize_id(data.get('project', '')) if data.get('project') else None
+            provider = data.get('provider') or None
+            if provider and provider not in ai.PROVIDERS:
+                self.send_json({'error': 'Unknown provider'}, 400)
+                return
+            key = data.get('key') or None
+            model = data.get('model') or None
+            base_url = data.get('base_url') or None
+
+            # Fill in provider/key/model from saved settings + credentials
+            settings = library.get_settings(sid)
+            if not provider:
+                provider = settings.get('default_provider') or None
+            if provider and provider in ai.PROVIDERS:
+                cred = library.get_credential(sid, provider)
+                if cred:
+                    key = key or cred.get('api_key')
+                    base_url = base_url or cred.get('base_url')
+                    model = model or cred.get('model')
+            if not model:
+                model = settings.get('default_model') or None
+
+            context, used = build_ai_context(sid, rid, project)
+            system = ("You are Resource Shrimp's library assistant. Answer using "
+                      "ONLY the provided context from the user's downloaded "
+                      "resources. If the answer is not in the context, say so "
+                      "plainly. Be concise and cite the resource titles you used.")
+            user_msg = (f"Context from the library:\n\n{context or '(empty)'}\n\n"
+                        f"Question: {question}")
+            messages = [
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': user_msg},
+            ]
+            try:
+                result = ai.chat(messages, provider=provider, key=key,
+                                 model=model, base_url=base_url)
+            except Exception as e:
+                self.send_json({'error': str(e)}, 502)
+                return
+            self.send_json({
+                'answer': result['answer'],
+                'provider': result['provider'],
+                'model': result['model'],
+                'used': used,
+            })
+            return
+
+        # ── Projects (Phase D) ──────────────────────────────────────
+        if path == '/api/projects':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            name = (data.get('name') or '').strip()[:80]
+            if not sid or not name:
+                self.send_json({'error': 'Name required'}, 400)
+                return
+            pid = secrets.token_urlsafe(12)
+            self.send_json({'project': library.create_project(sid, name, pid)})
+            return
+
+        if path == '/api/projects/rename':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            pid = sanitize_id(data.get('id', ''))
+            name = (data.get('name') or '').strip()[:80]
+            if not sid or not pid or not name:
+                self.send_json({'error': 'Bad request'}, 400)
+                return
+            self.send_json({'ok': library.rename_project(sid, pid, name)})
+            return
+
+        if path == '/api/projects/delete':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            pid = sanitize_id(data.get('id', ''))
+            if not sid or not pid:
+                self.send_json({'error': 'Bad request'}, 400)
+                return
+            self.send_json({'deleted': library.delete_project(sid, pid)})
+            return
+
+        if path == '/api/resource/move':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            rid = sanitize_id(data.get('id', ''))
+            pid_raw = data.get('project') or ''
+            pid = sanitize_id(pid_raw) if pid_raw else None
+            if not sid or not rid:
+                self.send_json({'error': 'Bad request'}, 400)
+                return
+            self.send_json({'moved': library.assign_resource(sid, rid, pid)})
+            return
+
+        # ── AI provider connections + settings (Phase D) ────────────
+        if path == '/api/ai/connect':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            provider = data.get('provider')
+            key = (data.get('key') or '').strip()
+            base_url = (data.get('base_url') or '').strip() or None
+            model = (data.get('model') or '').strip() or None
+            if not sid or provider not in {'openai', 'anthropic', 'groq', 'openrouter', 'custom'}:
+                self.send_json({'error': 'Unsupported provider'}, 400)
+                return
+            if not key:
+                self.send_json({'error': 'API key required'}, 400)
+                return
+            if provider == 'custom' and not base_url:
+                self.send_json({'error': 'Custom provider needs a base URL'}, 400)
+                return
+            library.set_credential(sid, provider, key, base_url, model, provider)
+            self.send_json({'connected': True, 'provider': provider})
+            return
+
+        if path == '/api/ai/disconnect':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            provider = data.get('provider')
+            if not sid or not provider:
+                self.send_json({'error': 'Bad request'}, 400)
+                return
+            library.delete_credential(sid, provider)
+            self.send_json({'ok': True})
+            return
+
+        if path == '/api/ai/settings':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            if not sid:
+                self.send_json({'error': 'No session'}, 400)
+                return
+            provider = data.get('default_provider') or None
+            if provider and provider not in ai.PROVIDERS:
+                self.send_json({'error': 'Unknown provider'}, 400)
+                return
+            model = (data.get('default_model') or '').strip() or None
+            library.set_settings(sid, provider, model)
+            self.send_json({'ok': True})
+            return
+
+        # ── Vault (API key encryption) ─────────────────────────────
+        if path == '/api/vault/unlock':
+            data = self.read_json_body()
+            if data is None:
+                return
+            pw = (data.get('password') or '').strip()
+            if not pw or len(pw) < 6:
+                self.send_json({'error': 'Password must be at least 6 characters'}, 400)
+                return
+            v = _vault_mod.get_vault()
+            if v.unlock(pw):
+                self.send_json({'ok': True, 'keys': v.list_keys()})
+            else:
+                self.send_json({'error': 'Wrong password'}, 401)
+            return
+
+        if path == '/api/vault/lock':
+            v = _vault_mod.get_vault()
+            v._key = None
+            v._fernet = None
+            self.send_json({'ok': True})
+            return
+
+        if path == '/api/vault/add':
+            data = self.read_json_body()
+            if data is None:
+                return
+            v = _vault_mod.get_vault()
+            if not v.is_unlocked():
+                self.send_json({'error': 'Vault locked'}, 401)
+                return
+            provider = (data.get('provider') or '').strip().lower()
+            key = (data.get('key') or '').strip()
+            label = (data.get('label') or '').strip() or None
+            if not provider or provider not in ('openai', 'anthropic', 'groq', 'openrouter', 'custom'):
+                self.send_json({'error': 'Unsupported provider'}, 400)
+                return
+            if not key:
+                self.send_json({'error': 'API key required'}, 400)
+                return
+            try:
+                v.add_key(provider, key, label)
+                sid = get_session(self)
+                if sid:
+                    base_url = (data.get('base_url') or '').strip() or None
+                    model = (data.get('model') or '').strip() or None
+                    library.set_credential(sid, provider, key, base_url, model, label)
+                self.send_json({'ok': True, 'keys': v.list_keys()})
+            except Exception as e:
+                self.send_json({'error': str(e)}, 400)
+            return
+
+        if path == '/api/vault/remove':
+            data = self.read_json_body()
+            if data is None:
+                return
+            v = _vault_mod.get_vault()
+            if not v.is_unlocked():
+                self.send_json({'error': 'Vault locked'}, 401)
+                return
+            provider = (data.get('provider') or '').strip().lower()
+            v.remove_key(provider)
+            sid = get_session(self)
+            if sid:
+                library.delete_credential(sid, provider)
+            self.send_json({'ok': True, 'keys': v.list_keys()})
+            return
+
+        if path == '/api/vault/test':
+            data = self.read_json_body()
+            if data is None:
+                return
+            v = _vault_mod.get_vault()
+            if not v.is_unlocked():
+                self.send_json({'error': 'Vault locked'}, 401)
+                return
+            provider = (data.get('provider') or '').strip().lower()
+            if provider == 'openai':
+                ok, msg = v.verify_key_openai()
+            elif provider == 'anthropic':
+                ok, msg = v.verify_key_anthropic()
+            else:
+                self.send_json({'error': 'Test not available for this provider'}, 400)
+                return
+            self.send_json({'valid': ok, 'message': msg})
+            return
+
+        if path == '/api/vault/list':
+            v = _vault_mod.get_vault()
+            if not v.is_unlocked():
+                self.send_json({'error': 'Vault locked'}, 401)
+                return
+            self.send_json({'keys': v.list_keys()})
+            return
+
+        if path == '/api/vault/proxy':
+            data = self.read_json_body(max_len=65536)
+            if data is None:
+                return
+            v = _vault_mod.get_vault()
+            if not v.is_unlocked():
+                self.send_json({'error': 'Vault locked'}, 401)
+                return
+            provider = (data.get('provider') or '').strip().lower()
+            messages = data.get('messages') or []
+            model = data.get('model') or None
+            if not provider or not messages:
+                self.send_json({'error': 'Provider and messages required'}, 400)
+                return
+            key = v.get_key(provider)
+            if not key:
+                self.send_json({'error': f'No key stored for {provider}'}, 404)
+                return
+            try:
+                result = ai.chat(messages, provider=provider, key=key, model=model)
+                self.send_json(result)
+            except Exception as e:
+                self.send_json({'error': str(e)}, 502)
             return
 
         self.send_error(404)
 
-    def _run_video(self, url, did, quality, subtitles, fmt):
+    def _run_provider(self, provider, url, opts, did, session):
         global ACTIVE_DOWNLOADS
         try:
-            download_video(url, did, quality, subtitles, fmt)
-        finally:
+            provider.resolve(url, opts, did)
             with downloads_lock:
-                ACTIVE_DOWNLOADS -= 1
-
-    def _run_article(self, url, did):
-        global ACTIVE_DOWNLOADS
-        try:
-            download_article(url, did)
+                job = dict(downloads.get(did, {}))
+            try:
+                rec = library.persist(job, did, session, url)
+                if rec and rec.get('filepath'):
+                    # Point the in-flight job at the persisted copy so an
+                    # immediate stream request still resolves.
+                    with downloads_lock:
+                        if did in downloads:
+                            downloads[did]['filepath'] = rec['filepath']
+            except Exception as e:
+                print(f"[library] persist failed: {e}", file=sys.stderr)
         finally:
             with downloads_lock:
                 ACTIVE_DOWNLOADS -= 1
