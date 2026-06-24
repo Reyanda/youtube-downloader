@@ -44,6 +44,12 @@ PROVIDERS = {
         "default_model": "meta-llama/llama-3.3-70b-instruct:free",
         "type": "openai",
     },
+    "deepseek": {
+        "base": "https://api.deepseek.com",
+        "key_env": "DEEPSEEK_API_KEY",
+        "default_model": "deepseek-chat",
+        "type": "openai",
+    },
     "ollama": {
         "base": os.environ.get("OLLAMA_BASE", "http://localhost:11434"),
         "key_env": None,
@@ -58,7 +64,7 @@ PROVIDERS = {
     },
 }
 # Preference order when the caller doesn't name a provider
-PREFERENCE = ["groq", "openrouter", "openai", "anthropic", "ollama"]
+PREFERENCE = ["groq", "openrouter", "openai", "anthropic", "deepseek", "ollama"]
 
 MAX_CONTEXT_CHARS = 48000
 
@@ -98,6 +104,54 @@ def _post(url, payload, headers, timeout=120):
     req = Request(url, data=body, headers=h)
     with urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
+
+
+# ── Transcription (audio/video → text) ──────────────────────────────
+# Uses the OpenAI-compatible /audio/transcriptions endpoint. Groq's
+# whisper-large-v3 is fast and cheap; OpenAI's whisper-1 also works.
+TRANSCRIBE_MODELS = {"groq": "whisper-large-v3", "openai": "whisper-1"}
+
+
+def transcribes(provider):
+    return provider in TRANSCRIBE_MODELS
+
+
+def _multipart(fields, file_field, filepath):
+    boundary = "----rs" + secrets.token_hex(12)
+    parts = []
+    for k, v in fields.items():
+        parts.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode())
+    fname = os.path.basename(filepath)
+    ctype = mimetypes.guess_type(fname)[0] or "application/octet-stream"
+    with open(filepath, "rb") as f:
+        content = f.read()
+    parts.append(
+        (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+         f"filename=\"{fname}\"\r\nContent-Type: {ctype}\r\n\r\n").encode())
+    body = b"".join(parts) + content + f"\r\n--{boundary}--\r\n".encode()
+    return body, boundary
+
+
+def transcribe(filepath, provider, key=None, model=None, base_url=None):
+    """Transcribe an audio/video file to text. Returns the transcript string."""
+    cfg = PROVIDERS.get(provider)
+    if not cfg or not transcribes(provider):
+        raise RuntimeError(f"{provider} does not support transcription (use Groq or OpenAI)")
+    api_key = key or _env_key(provider)
+    if not api_key:
+        raise RuntimeError(f"{provider} requires an API key")
+    model = model or TRANSCRIBE_MODELS[provider]
+    base = (base_url or cfg["base"]).rstrip("/")
+    body, boundary = _multipart({"model": model, "response_format": "json"},
+                                "file", filepath)
+    req = Request(base + "/audio/transcriptions", data=body, headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+    })
+    with urlopen(req, timeout=300) as r:
+        resp = json.loads(r.read())
+    return (resp.get("text") or "").strip()
 
 
 def _split_system(messages):

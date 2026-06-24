@@ -98,6 +98,14 @@ def init():
             default_model    TEXT
         )
     """)
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS access_creds (
+            session     TEXT PRIMARY KEY,
+            institution TEXT,
+            r4l_user    TEXT,
+            r4l_pass    TEXT
+        )
+    """)
     # Migration: add project_id to resources if an older DB lacks it
     cols = [r["name"] for r in _conn.execute("PRAGMA table_info(resources)").fetchall()]
     if "project_id" not in cols:
@@ -237,12 +245,15 @@ def list_resources(session, query=None, project=None, limit=300):
 
     project=None → all; project="__none__" → unfiled; else a project id.
     """
-    sql = "SELECT * FROM resources WHERE session = ?"
+    sql = ("SELECT r.*, "
+           "(SELECT CASE WHEN length(text) > 0 THEN 1 ELSE 0 END "
+           " FROM resource_text WHERE id = r.id) AS has_text "
+           "FROM resources r WHERE r.session = ?")
     args = [session]
     if project == "__none__":
-        sql += " AND (project_id IS NULL OR project_id = '')"
+        sql += " AND (r.project_id IS NULL OR r.project_id = '')"
     elif project:
-        sql += " AND project_id = ?"
+        sql += " AND r.project_id = ?"
         args.append(project)
     if query:
         sql += " AND (title LIKE ? OR source_url LIKE ? OR type LIKE ?)"
@@ -384,6 +395,39 @@ def get_settings(session):
             (session,),
         ).fetchone()
     return dict(row) if row else {"default_provider": None, "default_model": None}
+
+
+# ── Library access credentials (institutional / Research4Life) ──────
+def set_access(session, institution, r4l_user, r4l_pass):
+    """Store access creds. Keeps the existing password if a blank one is sent."""
+    with _lock:
+        if not r4l_pass:
+            row = _conn.execute(
+                "SELECT r4l_pass FROM access_creds WHERE session = ?", (session,)
+            ).fetchone()
+            if row:
+                r4l_pass = row["r4l_pass"]
+        _conn.execute(
+            "INSERT OR REPLACE INTO access_creds "
+            "(session, institution, r4l_user, r4l_pass) VALUES (?,?,?,?)",
+            (session, institution, r4l_user, r4l_pass),
+        )
+        _conn.commit()
+
+
+def get_access(session, with_secret=False):
+    with _lock:
+        row = _conn.execute(
+            "SELECT * FROM access_creds WHERE session = ?", (session,)
+        ).fetchone()
+    if not row:
+        return {"institution": None, "r4l_user": None, "has_r4l_pass": False}
+    d = dict(row)
+    out = {"institution": d.get("institution"), "r4l_user": d.get("r4l_user"),
+           "has_r4l_pass": bool(d.get("r4l_pass"))}
+    if with_secret:
+        out["r4l_pass"] = d.get("r4l_pass")
+    return out
 
 
 def get(session, rid):

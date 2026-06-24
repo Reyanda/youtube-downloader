@@ -5,20 +5,27 @@
     var input=document.getElementById('urlInput');
     var debounce;
 
+    var UI_ICONS={
+        video:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.2 15 12l-5 2.8V9.2Z" fill="currentColor" stroke="none"/></svg>',
+        audio:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17V5l10-2v12"/><circle cx="6" cy="17" r="3"/><circle cx="16" cy="15" r="3"/></svg>',
+        doc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>',
+        file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></svg>'
+    };
+
     input.addEventListener('input', function(){clearTimeout(debounce);var u=input.value.trim();u.length>8?debounce=setTimeout(function(){det(u)},300):hideType()});
     input.addEventListener('keydown', function(e){if(e.key==='Enter')startDownload()});
 
     function det(u){
         u=u.toLowerCase();
-        if(/^10\.\d{4,}/.test(u)||/doi\.org\/10\./.test(u))return showT('doi','\u{1F4C4}','Academic Paper (DOI)','DOI resolution');
-        if(u.includes('arxiv.org'))return showT('arxiv','\u{1F4D1}','arXiv Paper','Preprint');
-        if(u.includes('pubmed')||u.includes('ncbi.nlm.nih.gov'))return showT('pubmed','\u{1F3E5}','PubMed','Medical literature');
-        if(/springer|wiley|sciencedirect|nature\.com|science\.org|ieee|acm/.test(u))return showT('academic','\u{1F4DA}','Academic Article','Journal article');
-        showT('video','\u{1F3AC}','Video','YouTube, Vimeo, TikTok + 1000 more');
+        if(/^10\.\d{4,}/.test(u)||/doi\.org\/10\./.test(u)||/\/10\.\d{4,}\//.test(u))return showT('doi','doc','Academic Paper','DOI → open-access PDF');
+        if(u.includes('arxiv.org'))return showT('arxiv','doc','arXiv Paper','Preprint');
+        if(u.includes('pubmed')||u.includes('ncbi.nlm.nih.gov'))return showT('pubmed','doc','PubMed','Medical literature');
+        if(/springer|wiley|sciencedirect|nature\.com|science\.org|ieee|acm/.test(u))return showT('academic','doc','Academic Article','Journal article');
+        showT('video','video','Video','YouTube, Vimeo, TikTok + 1000 more');
     }
 
     function showT(t,icon,label,hint){
-        type=t;document.getElementById('typeIcon').textContent=icon;
+        type=t;document.getElementById('typeIcon').innerHTML=UI_ICONS[icon]||UI_ICONS.file;
         document.getElementById('typeLabel').textContent=label;
         document.getElementById('typeHint').textContent=hint;
         document.getElementById('typeBadge').classList.add('active');
@@ -99,23 +106,8 @@
 
     function triggerDl(id){var a=document.createElement('a');a.href='/api/stream/'+encodeURIComponent(id);a.style.display='none';document.body.appendChild(a);a.click();setTimeout(function(){a.remove()},1000)}
 
-    // Institution
-    var insts=[
-        {n:'MIT',r:'USA'},{n:'Harvard',r:'USA'},{n:'Stanford',r:'USA'},{n:'Oxford',r:'UK'},
-        {n:'Cambridge',r:'UK'},{n:'ETH Zurich',r:'Switzerland'},{n:'U of Tokyo',r:'Japan'},
-        {n:'NUS',r:'Singapore'},{n:'U of Cape Town',r:'South Africa'},{n:'U of Nairobi',r:'Kenya'},
-        {n:'Makerere',r:'Uganda'},{n:'U of Ghana',r:'Ghana'},{n:'U of Malaya',r:'Malaysia'},
-        {n:'U of S\u00e3o Paulo',r:'Brazil'},{n:'IISc',r:'India'},{n:'Tsinghua',r:'China'},
-        {n:'Seoul National',r:'South Korea'},{n:'U of Buenos Aires',r:'Argentina'},
-    ];
-    window.openInst=function(){document.getElementById('instModal').classList.add('active');filterInst('')};
-    window.filterInst=function(q){document.getElementById('instList').innerHTML=insts.filter(function(i){return i.n.toLowerCase().indexOf(q.toLowerCase())!==-1||i.r.toLowerCase().indexOf(q.toLowerCase())!==-1}).map(function(i){return '<div class="inst-item" data-url="https://login.research4life.org/" onclick="window.open(this.dataset.url,\'_blank\');document.getElementById(\'instModal\').classList.remove(\'active\')"><div class="inst-icon">\u{1F3DB}\uFE0F</div><div><div class="inst-name">'+i.n+'</div><div class="inst-region">'+i.r+'</div></div></div>'}).join('')};
-    window.openR4L=function(){document.getElementById('r4lModal').classList.add('active')};
-    window.openSH=function(){var u=input.value.trim();var m=u.match(/10\.\d{4,}\/[^\s&?]+/);window.open(m?'https://sci-hub.su/'+m[0]:'https://sci-hub.su','_blank')};
-    window.openOA=function(){var u=input.value.trim();var m=u.match(/10\.\d{4,}\/[^\s&?]+/);window.open(m?'https://api.unpaywall.org/v2/'+m[0]+'?email=dl@rs.app':'https://unpaywall.org','_blank')};
-
     // ── Library ──────────────────────────────────────────────────────
-    var TYPE_ICON={video:'\u{1F3AC}',article:'\u{1F4C4}'};
+    var TYPE_ICON={video:UI_ICONS.video,article:UI_ICONS.doc};
     function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
     function fmtSize(b){b=Number(b)||0;if(!b)return'';var u=['B','KB','MB','GB','TB'],i=0;while(b>=1024&&i<u.length-1){b/=1024;i++}return b.toFixed(i?1:0)+' '+u[i]}
     function mainEls(){return[document.querySelector('.hero'),document.querySelector('.input-card'),document.getElementById('progressSection'),document.getElementById('features')]}
@@ -146,11 +138,12 @@
             var sub=[it.type,m.journal,m.year].filter(Boolean).join(' · ');
             var sz=fmtSize(it.size);
             return '<div class="lib-card">'+
-                '<div class="lib-icon">'+(TYPE_ICON[it.type]||'\u{1F4E6}')+'</div>'+
+                '<div class="lib-icon">'+(TYPE_ICON[it.type]||UI_ICONS.file)+'</div>'+
                 '<div class="lib-body"><div class="lib-title">'+esc(it.title||it.filename||'Untitled')+'</div>'+
                 '<div class="lib-sub">'+esc(sub)+(sz?(' · '+sz):'')+'</div></div>'+
                 '<div class="lib-actions">'+
                 projMoveSelect(it)+
+                (it.type==='video'&&it.filename&&!it.has_text?('<button class="lib-btn lib-transcribe" data-id="'+esc(it.id)+'">Transcribe</button>'):'')+
                 (it.filename?('<button class="lib-btn lib-ask" data-id="'+esc(it.id)+'" data-title="'+esc(it.title||it.filename||'')+'">Ask</button>'):'')+
                 (it.filename?('<a class="lib-btn" href="/api/stream/'+encodeURIComponent(it.id)+'">Download</a>'):'')+
                 (it.filename&&drive.connected?('<button class="lib-btn lib-drive" data-id="'+esc(it.id)+'">Drive</button>'):'')+
@@ -161,6 +154,18 @@
         Array.prototype.forEach.call(grid.querySelectorAll('.lib-drive'),function(b){b.onclick=function(){syncDrive(b.getAttribute('data-id'),b)}});
         Array.prototype.forEach.call(grid.querySelectorAll('.lib-ask'),function(b){b.onclick=function(){setAskScope(b.getAttribute('data-id'),b.getAttribute('data-title'))}});
         Array.prototype.forEach.call(grid.querySelectorAll('.lib-move'),function(s){s.onchange=function(){moveResource(s.getAttribute('data-id'),s.value)}});
+        Array.prototype.forEach.call(grid.querySelectorAll('.lib-transcribe'),function(b){b.onclick=function(){transcribeRes(b.getAttribute('data-id'),b)}});
+    }
+
+    function transcribeRes(id,btn){
+        if(btn){btn.disabled=true;btn.textContent='Transcribing…'}
+        fetch('/api/transcribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
+        .then(function(r){return r.json()})
+        .then(function(d){
+            if(d.error){if(btn){btn.disabled=false;btn.textContent='Transcribe'}var a=document.getElementById('askAnswer');if(a){a.style.display='block';a.className='ask-answer error';a.textContent=d.error}}
+            else{refreshLibIfOpen()}
+        })
+        .catch(function(){if(btn){btn.disabled=false;btn.textContent='Transcribe'}});
     }
 
     function projMoveSelect(it){
@@ -207,7 +212,7 @@
         if(btn){btn.disabled=true;btn.textContent='…'}
         fetch('/api/drive/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
         .then(function(r){return r.json()})
-        .then(function(d){if(btn){btn.disabled=false;btn.textContent=d.synced?'✓ Drive':'Drive';if(d.error)btn.textContent='Failed'}})
+        .then(function(d){if(btn){btn.disabled=false;btn.textContent=d.synced?'Saved':'Drive';if(d.error)btn.textContent='Failed'}})
         .catch(function(){if(btn){btn.disabled=false;btn.textContent='Failed'}});
     }
 
@@ -295,8 +300,33 @@
     }
 
     // ── Settings (AI providers) ──────────────────────────────────────
-    var PROVIDER_LABELS={openai:'OpenAI',anthropic:'Anthropic (Claude)',groq:'Groq',openrouter:'OpenRouter',custom:'Custom',ollama:'Ollama (local)'};
-    window.openSettings=function(){loadSettings();document.getElementById('settingsModal').classList.add('active')};
+    var PROVIDER_LABELS={openai:'OpenAI',anthropic:'Anthropic',groq:'Groq',openrouter:'OpenRouter',deepseek:'DeepSeek',custom:'Custom',ollama:'Ollama'};
+    var PROVIDER_ICONS={
+        openai:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c1.5 0 2.9.8 3.6 2.1a4.1 4.1 0 0 1 2.9 6.8 4.1 4.1 0 0 1-3.6 6.9A4.1 4.1 0 0 1 12 19a4.1 4.1 0 0 1-2.9-1.2 4.1 4.1 0 0 1-3.6-6.9 4.1 4.1 0 0 1 2.9-6.8A4.1 4.1 0 0 1 12 2Zm0 4.6L8.9 8.4v3.5L12 13.7l3.1-1.8V8.4L12 6.6Z"/></svg>',
+        anthropic:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.1 4h-2.6l4.7 16H20L15.1 4ZM7.1 4 2.3 20h2.7l1-3.5h4.5l1 3.5H14L9.2 4H7.1Zm-.4 10.2 1.5-5.3 1.5 5.3H6.7Z"/></svg>',
+        deepseek:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.8 10.6c3.2-1.1 5.2 1.1 7.3 1.1 2 0 3.1-3 6.1-3 2.1 0 3.7 1.3 4.2 3.2-.7-.5-1.4-.6-2.1-.1.8.6 1.1 1.7.6 2.8-.5-.7-1.3-.9-2.1-.4.3.9 0 1.8-.9 2.3.1-1.1-.6-1.8-1.6-1.9-2.3-.2-3.2 1-5.4 1-3.2-.1-5.3-2-6.1-5Zm12.5-1a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/></svg>',
+        groq:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a7 7 0 1 0 2 13.7V14.5A4.8 4.8 0 1 1 16.8 12H19A7 7 0 0 0 12 3Zm0 4.2a4.8 4.8 0 0 0-.1 9.6V14.5a2.6 2.6 0 1 1 .1-5.1V7.2Z"/></svg>',
+        openrouter:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.4"/><path d="M12 4.5v3M12 16.5v3M4.5 12h3M16.5 12h3"/><circle cx="12" cy="3.2" r="1.3" fill="currentColor"/><circle cx="12" cy="20.8" r="1.3" fill="currentColor"/><circle cx="3.2" cy="12" r="1.3" fill="currentColor"/><circle cx="20.8" cy="12" r="1.3" fill="currentColor"/></svg>',
+        ollama:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 3c-1 0-1.6 1-1.5 2.3C5.6 6.1 5 7.4 5 9.1c0 .6.1 1.1.3 1.6C4.5 11.4 4 12.5 4 14v4c0 1.1.9 2 2 2h1.5v-2H6v-4c0-1.1.7-1.9 1.4-2.2.5.2 1 .3 1.6.3h6c.6 0 1.1-.1 1.6-.3.7.3 1.4 1.1 1.4 2.2v4H18v2h2v-2-4c0-1.5-.5-2.6-1.3-3.3.2-.5.3-1 .3-1.6 0-1.7-.6-3-1.5-3.8C17.6 4 17 3 16 3c-.8 0-1.4.6-1.7 1.5C13.6 4.2 12.8 4 12 4s-1.6.2-2.3.5C9.4 3.6 8.8 3 8 3Zm1 7a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm6 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z"/></svg>',
+        custom:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7h9M16 7h5M3 12h3M10 12h11M3 17h6M14 17h7"/><circle cx="14" cy="7" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="12" cy="17" r="2"/></svg>',
+        google:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 11v2.9h4.1c-.2 1.1-1.4 3.1-4.1 3.1a4.9 4.9 0 1 1 0-9.8c1.4 0 2.4.6 2.9 1.1l2-1.9C15.5 5.1 13.9 4.5 12 4.5a7.5 7.5 0 1 0 0 15c4.3 0 7.2-3 7.2-7.4 0-.5 0-.8-.1-1.1H12Z"/></svg>'
+    };
+    function provIcon(p){return '<span class="prov-ico">'+(PROVIDER_ICONS[p]||PROVIDER_ICONS.custom)+'</span>'}
+    var selectedAddProvider='openai';
+    window.openSettings=function(){loadSettings();loadAccess();document.getElementById('settingsModal').classList.add('active')};
+    function loadAccess(){
+        fetch('/api/access').then(function(r){return r.json()}).then(function(d){
+            document.getElementById('accInstitution').value=d.institution||'';
+            document.getElementById('accR4LUser').value=d.r4l_user||'';
+        }).catch(function(){});
+    }
+    window.saveAccess=function(){
+        var body={institution:document.getElementById('accInstitution').value.trim(),r4l_user:document.getElementById('accR4LUser').value.trim(),r4l_pass:document.getElementById('accR4LPass').value};
+        var m=document.getElementById('accMsg');m.textContent='Saving…';m.className='set-msg';
+        fetch('/api/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+        .then(function(r){return r.json()}).then(function(d){if(d.error){m.textContent=d.error;m.className='set-msg err'}else{m.textContent='Saved.';m.className='set-msg ok';document.getElementById('accR4LPass').value='';setTimeout(function(){m.textContent=''},1500)}})
+        .catch(function(){m.textContent='Failed.';m.className='set-msg err'});
+    };
     function loadSettings(){
         fetch('/api/ai/status').then(function(r){return r.json()}).then(function(d){
             // default provider dropdown: ready + connected + catalog
@@ -305,29 +335,39 @@
             var sel=document.getElementById('setProvider');
             var opts='<option value="">Auto (best available)</option>';
             (d.catalog||[]).forEach(function(p){
-                var ready=avail.hasOwnProperty(p)?' ✓':'';
+                var ready=avail.hasOwnProperty(p)?' (ready)':'';
                 opts+='<option value="'+p+'">'+(PROVIDER_LABELS[p]||p)+ready+'</option>';
             });
             sel.innerHTML=opts;
             sel.value=(d.settings&&d.settings.default_provider)||'';
             document.getElementById('setModel').value=(d.settings&&d.settings.default_model)||'';
-            // connected list
+            // add-provider icon tiles
+            renderAddTiles(d.catalog||[]);
+            // connected list (with icons)
             var c=document.getElementById('setConnected');
             var list=(d.connected||[]);
             if(!list.length){c.innerHTML='<div class="set-empty">No providers connected. Ollama and any env keys work automatically.</div>'}
             else{c.innerHTML=list.map(function(x){
-                return '<div class="set-conn"><span><b>'+(PROVIDER_LABELS[x.provider]||x.provider)+'</b> <span class="set-hint">'+esc(x.model||'')+' · key '+esc(x.key_hint)+'</span></span><button class="drive-btn ghost" data-p="'+esc(x.provider)+'">Disconnect</button></div>';
+                return '<div class="set-conn"><span class="set-conn-id">'+provIcon(x.provider)+'<b>'+(PROVIDER_LABELS[x.provider]||x.provider)+'</b> <span class="set-hint">'+esc(x.model||'')+' · key '+esc(x.key_hint)+'</span></span><button class="drive-btn ghost" data-p="'+esc(x.provider)+'">Disconnect</button></div>';
             }).join('');
             Array.prototype.forEach.call(c.querySelectorAll('button[data-p]'),function(b){b.onclick=function(){disconnectProvider(b.getAttribute('data-p'))}});}
         }).catch(function(){});
     }
-    window.onAddProvider=function(){document.getElementById('addBase').style.display=document.getElementById('addProvider').value==='custom'?'block':'none'};
+    function renderAddTiles(catalog){
+        var keyed=catalog.filter(function(p){return p!=='ollama'});  // ollama needs no key
+        var g=document.getElementById('addProviderTiles');
+        g.innerHTML=keyed.map(function(p){
+            return '<button class="prov-tile'+(p===selectedAddProvider?' on':'')+'" data-p="'+p+'">'+provIcon(p)+'<span>'+(PROVIDER_LABELS[p]||p)+'</span></button>';
+        }).join('');
+        Array.prototype.forEach.call(g.querySelectorAll('.prov-tile'),function(b){b.onclick=function(){selectedAddProvider=b.getAttribute('data-p');renderAddTiles(catalog);window.onAddProvider()}});
+    }
+    window.onAddProvider=function(){document.getElementById('addBase').style.display=selectedAddProvider==='custom'?'block':'none'};
     window.saveSettings=function(){
         fetch('/api/ai/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({default_provider:document.getElementById('setProvider').value,default_model:document.getElementById('setModel').value.trim()})})
         .then(function(r){return r.json()}).then(function(){var m=document.getElementById('addMsg');m.textContent='Saved.';m.className='set-msg ok';setTimeout(function(){m.textContent=''},1500)});
     };
     window.connectProvider=function(){
-        var body={provider:document.getElementById('addProvider').value,key:document.getElementById('addKey').value.trim(),model:document.getElementById('addModel').value.trim(),base_url:document.getElementById('addBase').value.trim()};
+        var body={provider:selectedAddProvider,key:document.getElementById('addKey').value.trim(),model:document.getElementById('addModel').value.trim(),base_url:document.getElementById('addBase').value.trim()};
         var m=document.getElementById('addMsg');m.textContent='Connecting…';m.className='set-msg';
         fetch('/api/ai/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
         .then(function(r){return r.json()}).then(function(d){

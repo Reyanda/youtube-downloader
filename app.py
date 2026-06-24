@@ -128,7 +128,37 @@ def google_access_token(session):
                        tok.get("refresh_token"), expiry)
     return access
 
-# ── AI context building (Phase C) ───────────────────────────────────
+def drive_autosync(session, rec):
+    """Push a freshly-persisted file to the user's Drive when connected.
+    Hosted disks (e.g. Render) are ephemeral, so Drive is the durable store."""
+    if not (rec and rec.get('filepath') and gdrive.configured()):
+        return
+    access = google_access_token(session)
+    if not access:
+        return
+    try:
+        folder = gdrive.ensure_folder(access)
+        gdrive.upload(access, rec['filepath'], rec['filename'], folder,
+                      rec.get('mime') or 'application/octet-stream')
+        print(f"[gdrive] auto-synced {rec['filename']}", file=sys.stderr)
+    except Exception as e:
+        print(f"[gdrive] autosync failed: {e}", file=sys.stderr)
+
+# ── AI assistant (Phase C/D) ────────────────────────────────────────
+# NotebookLM-style: grounded in the user's own library, honest about gaps.
+AI_SYSTEM_PROMPT = (
+    "You are Resource Shrimp's research assistant — a NotebookLM-style guide over the "
+    "user's own library of downloaded papers, articles, and transcripts of audio/video.\n"
+    "Follow these rules strictly:\n"
+    "1. Answer ONLY from the provided context. Do not use outside knowledge or guess.\n"
+    "2. If the answer is not in the context, say plainly what is missing — never fabricate "
+    "facts, quotes, numbers, or citations.\n"
+    "3. Cite the resource titles you used (and timestamps when the context includes them).\n"
+    "4. When sources cover the same point, synthesize them and note any disagreement.\n"
+    "5. Be concise and plain — no marketing, filler, or hedging. Mark uncertainty explicitly.\n"
+    "6. For summary requests, give a faithful, structured summary of the sources, not opinion."
+)
+
 def ensure_resource_text(session, rid):
     """Return cached/extracted text for a resource the session owns."""
     cached = library.get_text(session, rid)
@@ -235,6 +265,10 @@ def safe_path(base, user_path):
 OPENALEX = "https://api.openalex.org"
 UNPAYWALL = "https://api.unpaywall.org/v2"
 SCIHUB = "https://sci-hub.su"
+EUROPEPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest"
+# Some OA hosts (Wiley, etc.) reject non-browser agents on direct PDF links.
+BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36")
 
 def http_get(url, timeout=15, headers=None):
     h = {"User-Agent": "ResourceShrimp/2.0"}
@@ -256,16 +290,27 @@ def detect_url_type(url):
         return 'arxiv'
     if 'pubmed' in u or 'ncbi.nlm.nih.gov' in u:
         return 'pubmed'
+    # A DOI embedded in a publisher URL (e.g. wiley /doi/10.1111/..)
+    if re.search(r'/10\.\d{4,}/', u):
+        return 'doi'
     if re.search(r'springer|wiley|sciencedirect|nature\.com|science\.org|ieee|acm', u):
         return 'academic'
     return 'video'
 
 def extract_doi(url):
+    """Pull a DOI from a raw DOI, a doi.org link, or any publisher URL path."""
     url = url.strip()
     if re.match(r'^10\.\d{4,}/', url):
-        return url
-    m = re.search(r'(?:doi\.org|dx\.doi\.org)/(10\.\d{4,}/[^\s]+)', url)
-    return m.group(1) if m else None
+        m = re.match(r'(10\.\d{4,}/\S+)', url)
+    else:
+        m = re.search(r'(?:doi\.org|dx\.doi\.org)/(10\.\d{4,}/[^\s?#]+)', url) \
+            or re.search(r'(10\.\d{4,}/[^\s?#]+)', url)
+    if not m:
+        return None
+    doi = m.group(1)
+    # Trim common publisher path suffixes and trailing punctuation
+    doi = re.sub(r'/(full|pdf|epdf|pdfdirect|abstract|meta)$', '', doi)
+    return doi.rstrip('/.')
 
 def fetch_openalex(doi=None, search=None):
     try:
@@ -301,6 +346,28 @@ def fetch_unpaywall(doi):
                 }
     except Exception as e:
         print(f"[unpaywall] {e}", file=sys.stderr)
+    return None
+
+def fetch_europepmc(doi):
+    """Lawful OA route: if the paper is open-access in Europe PMC / PMC,
+    return its render-PDF URL. Reliable for biomedical/nutrition papers
+    where publisher links (Unpaywall) are blocked."""
+    try:
+        q = quote(f'DOI:"{doi}"')
+        url = f"{EUROPEPMC}/search?query={q}&format=json&resultType=core&pageSize=1"
+        data, code, _ = http_get(url, timeout=20)
+        if code != 200:
+            return None
+        results = json.loads(data).get('resultList', {}).get('result', [])
+        if not results:
+            return None
+        a = results[0]
+        pmcid = a.get('pmcid')
+        if pmcid and (a.get('isOpenAccess') == 'Y' or a.get('inEPMC') == 'Y'):
+            return {'pdf_url': f"https://europepmc.org/articles/{pmcid}?pdf=render",
+                    'pmcid': pmcid}
+    except Exception as e:
+        print(f"[europepmc] {e}", file=sys.stderr)
     return None
 
 def fetch_scihub(doi):
@@ -465,6 +532,54 @@ def download_video(url, did, quality='1080p', subtitles=False, fmt='mp4'):
         with downloads_lock:
             downloads[did].update({'status': 'error', 'error': str(e), 'message': f'Error: {e}'})
 
+# Publisher CDNs that commonly 403 programmatic PDF fetches — try open
+# repository copies first, these last (before any fallback).
+_BLOCKED_PDF_HOSTS = ('wiley', 'onlinelibrary', 'sciencedirect', 'springer',
+                      'tandfonline', 'sagepub', 'ieee')
+
+def _is_blocked_host(u):
+    u = (u or '').lower()
+    return any(h in u for h in _BLOCKED_PDF_HOSTS)
+
+def openalex_pdf_urls(work):
+    """OA PDF URLs from an OpenAlex work — includes green/repository copies
+    that are downloadable when the publisher version is blocked."""
+    out = []
+    if not work:
+        return out
+    for loc in (work.get('locations') or []):
+        if loc.get('is_oa') and loc.get('pdf_url'):
+            out.append(loc['pdf_url'])
+    best = work.get('best_oa_location') or {}
+    if best.get('pdf_url'):
+        out.append(best['pdf_url'])
+    oa_url = (work.get('open_access') or {}).get('oa_url')
+    if oa_url and oa_url.lower().endswith('.pdf'):
+        out.append(oa_url)
+    return out
+
+def pdf_candidates(doi, work=None):
+    """Ordered PDF URLs to try for a DOI: open repositories / PMC first,
+    blocked publisher links deferred, configured fallback last."""
+    preferred, deferred, fallback = [], [], []
+    epmc = fetch_europepmc(doi)
+    if epmc and epmc.get('pdf_url'):
+        preferred.append(epmc['pdf_url'])
+    for u in openalex_pdf_urls(work):
+        (deferred if _is_blocked_host(u) else preferred).append(u)
+    oa = fetch_unpaywall(doi)
+    if oa and oa.get('pdf_url'):
+        (deferred if _is_blocked_host(oa['pdf_url']) else preferred).append(oa['pdf_url'])
+    sh = fetch_scihub(doi)
+    if sh:
+        fallback.append(sh)
+    seen, out = set(), []
+    for u in preferred + deferred + fallback:
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
 def download_article(url, did):
     temp_dir = tempfile.mkdtemp(dir=TEMP_ROOT, prefix="art_")
     with downloads_lock:
@@ -479,7 +594,7 @@ def download_article(url, did):
     try:
         url_type = detect_url_type(url)
         paper_info = None
-        pdf_url = None
+        candidates = []
 
         with downloads_lock:
             downloads[did].update({'status': 'fetching', 'phase': 'fetching', 'message': 'Searching databases...'})
@@ -487,20 +602,17 @@ def download_article(url, did):
         if url_type == 'arxiv':
             paper_info = fetch_arxiv(url)
             if paper_info:
-                pdf_url = paper_info.get('pdf_url')
+                if paper_info.get('pdf_url'):
+                    candidates.append(paper_info['pdf_url'])
                 paper_info['source'] = 'arXiv'
         elif url_type == 'doi':
             doi = extract_doi(url)
             if doi:
                 paper_info = fetch_openalex(doi=doi)
-                oa = fetch_unpaywall(doi)
                 if paper_info:
                     paper_info['doi'] = doi
                     paper_info['source'] = 'OpenAlex'
-                if oa and oa.get('pdf_url'):
-                    pdf_url = oa['pdf_url']
-                elif not pdf_url:
-                    pdf_url = fetch_scihub(doi)
+                candidates = pdf_candidates(doi, paper_info)
         else:
             paper_info = fetch_openalex(search=url)
             if paper_info:
@@ -508,11 +620,7 @@ def download_article(url, did):
                 doi_raw = paper_info.get('doi', '')
                 doi = doi_raw.replace('https://doi.org/', '') if doi_raw else None
                 if doi:
-                    oa = fetch_unpaywall(doi)
-                    if oa and oa.get('pdf_url'):
-                        pdf_url = oa['pdf_url']
-                    elif not pdf_url:
-                        pdf_url = fetch_scihub(doi)
+                    candidates = pdf_candidates(doi, paper_info)
 
         if not paper_info:
             raise ValueError("Could not find paper. Check the URL or try a DOI.")
@@ -533,36 +641,34 @@ def download_article(url, did):
                 'doi': paper_info.get('doi', ''),
                 'journal': (paper_info.get('primary_location') or {}).get('source', {}).get('display_name', '') if paper_info.get('primary_location') else '',
                 'year': paper_info.get('publication_year', ''),
-                'pdf_url': pdf_url,
+                'pdf_url': candidates[0] if candidates else None,
             })
 
-        if pdf_url:
-            data, code, headers = http_get(pdf_url, timeout=30)
+        # Try each candidate (lawful OA first) with a browser UA until one is a real PDF
+        pdf_path = None
+        for cand in candidates:
+            data, code, headers = http_get(
+                cand, timeout=40,
+                headers={'User-Agent': BROWSER_UA, 'Accept': 'application/pdf,*/*'})
             ct = (headers.get('Content-Type') or '').lower()
-            # Detect a PDF by magic bytes — many hosts (e.g. arXiv) omit a
-            # reliable Content-Type and the URL may lack a .pdf suffix.
-            is_pdf = data[:5] == b'%PDF-' or 'pdf' in ct or pdf_url.lower().endswith('.pdf')
+            is_pdf = data[:5] == b'%PDF-' or ('pdf' in ct and bool(data))
             if code == 200 and data and is_pdf:
                 pdf_path = os.path.join(temp_dir, f"{clean_title}.pdf")
                 with open(pdf_path, 'wb') as f:
                     f.write(data)
-                with downloads_lock:
-                    downloads[did].update({
-                        'status': 'complete', 'phase': 'ready', 'progress': '100',
-                        'filename': f"{clean_title}.pdf", 'filepath': pdf_path,
-                        'message': 'Paper downloaded!', 'has_pdf': True,
-                    })
-            else:
-                with downloads_lock:
-                    downloads[did].update({
-                        'status': 'complete', 'phase': 'ready', 'progress': '100',
-                        'message': 'Paper found', 'has_pdf': False,
-                    })
-        else:
-            with downloads_lock:
+                break
+
+        with downloads_lock:
+            if pdf_path:
                 downloads[did].update({
                     'status': 'complete', 'phase': 'ready', 'progress': '100',
-                    'message': 'Paper found', 'has_pdf': False,
+                    'filename': f"{clean_title}.pdf", 'filepath': pdf_path,
+                    'message': 'Paper downloaded!', 'has_pdf': True,
+                })
+            else:
+                downloads[did].update({
+                    'status': 'complete', 'phase': 'ready', 'progress': '100',
+                    'message': 'Paper found — no free PDF available', 'has_pdf': False,
                 })
 
     except Exception as e:
@@ -705,6 +811,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json({'projects': library.list_projects(sid) if sid else []})
             return
 
+        # Library access credentials (institution / Research4Life)
+        if path == '/api/access':
+            sid = get_session(self)
+            self.send_json(library.get_access(sid) if sid else
+                           {'institution': None, 'r4l_user': None, 'has_r4l_pass': False})
+            return
+
         # AI assistant availability + connected providers + settings
         if path == '/api/ai/status':
             sid = get_session(self)
@@ -715,7 +828,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 'providers': providers_avail,        # ready now via env / local
                 'connected': connected,              # user-added, key masked
                 'settings': settings,
-                'catalog': ['openai', 'anthropic', 'groq', 'openrouter', 'custom', 'ollama'],
+                'catalog': ['openai', 'anthropic', 'groq', 'openrouter', 'deepseek', 'custom', 'ollama'],
                 'ready': bool(providers_avail) or bool(connected),
             })
             return
@@ -1069,10 +1182,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 model = settings.get('default_model') or None
 
             context, used = build_ai_context(sid, rid, project)
-            system = ("You are Resource Shrimp's library assistant. Answer using "
-                      "ONLY the provided context from the user's downloaded "
-                      "resources. If the answer is not in the context, say so "
-                      "plainly. Be concise and cite the resource titles you used.")
+            system = AI_SYSTEM_PROMPT
             user_msg = (f"Context from the library:\n\n{context or '(empty)'}\n\n"
                         f"Question: {question}")
             messages = [
@@ -1091,6 +1201,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 'model': result['model'],
                 'used': used,
             })
+            return
+
+        # ── Transcription: audio/video → text (NotebookLM media) ────
+        if path == '/api/transcribe':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            rid = sanitize_id(data.get('id', ''))
+            if not sid or not rid:
+                self.send_json({'error': 'Bad request'}, 400)
+                return
+            rec = library.get(sid, rid)
+            if not rec or not rec.get('filepath'):
+                self.send_json({'error': 'No media file for this item'}, 404)
+                return
+            real = os.path.realpath(rec['filepath'])
+            if not real.startswith(os.path.realpath(library.LIBRARY_ROOT) + os.sep) \
+                    or not os.path.isfile(real):
+                self.send_json({'error': 'File unavailable'}, 404)
+                return
+            if os.path.getsize(real) > 24 * 1024 * 1024:
+                self.send_json({'error': 'File too large to transcribe (max ~24MB). '
+                                'Use audio-only or shorter clips; chunking is coming.'}, 413)
+                return
+            # Resolve a transcription-capable provider (Groq or OpenAI)
+            provider = data.get('provider') or None
+            key = data.get('key') or None
+            if not provider or not ai.transcribes(provider):
+                provider = None
+                for p in ('groq', 'openai'):
+                    if library.get_credential(sid, p) or ai._env_key(p):
+                        provider = p
+                        break
+            if not provider:
+                self.send_json({'error': 'Connect Groq or OpenAI in Settings — '
+                                'they handle transcription.'}, 400)
+                return
+            cred = library.get_credential(sid, provider)
+            if cred and not key:
+                key = cred.get('api_key')
+            base_url = cred.get('base_url') if cred else None
+            try:
+                text = ai.transcribe(real, provider, key=key, base_url=base_url)
+            except Exception as e:
+                self.send_json({'error': f'Transcription failed: {e}'}, 502)
+                return
+            if not text:
+                self.send_json({'error': 'Empty transcript'}, 502)
+                return
+            library.set_text(rid, text)
+            self.send_json({'ok': True, 'chars': len(text), 'provider': provider})
             return
 
         # ── Projects (Phase D) ──────────────────────────────────────
@@ -1156,7 +1318,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             key = (data.get('key') or '').strip()
             base_url = (data.get('base_url') or '').strip() or None
             model = (data.get('model') or '').strip() or None
-            if not sid or provider not in {'openai', 'anthropic', 'groq', 'openrouter', 'custom'}:
+            if not sid or provider not in {'openai', 'anthropic', 'groq', 'openrouter', 'deepseek', 'custom'}:
                 self.send_json({'error': 'Unsupported provider'}, 400)
                 return
             if not key:
@@ -1199,6 +1361,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json({'ok': True})
             return
 
+        if path == '/api/access':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            if not sid:
+                self.send_json({'error': 'No session'}, 400)
+                return
+            library.set_access(sid,
+                               (data.get('institution') or '').strip()[:200],
+                               (data.get('r4l_user') or '').strip()[:120],
+                               (data.get('r4l_pass') or '')[:200])
+            self.send_json({'ok': True})
+            return
+
         # ── Vault (API key encryption) ─────────────────────────────
         if path == '/api/vault/unlock':
             data = self.read_json_body()
@@ -1233,7 +1410,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             provider = (data.get('provider') or '').strip().lower()
             key = (data.get('key') or '').strip()
             label = (data.get('label') or '').strip() or None
-            if not provider or provider not in ('openai', 'anthropic', 'groq', 'openrouter', 'custom'):
+            if not provider or provider not in ('openai', 'anthropic', 'groq', 'openrouter', 'deepseek', 'custom'):
                 self.send_json({'error': 'Unsupported provider'}, 400)
                 return
             if not key:
@@ -1335,6 +1512,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     with downloads_lock:
                         if did in downloads:
                             downloads[did]['filepath'] = rec['filepath']
+                    # Durable storage: sync to the user's Drive when connected
+                    drive_autosync(session, rec)
             except Exception as e:
                 print(f"[library] persist failed: {e}", file=sys.stderr)
         finally:

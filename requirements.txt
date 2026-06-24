@@ -1,3 +1,4 @@
 # Runtime deps (kept minimal). The HTTP server itself is stdlib-only.
-yt-dlp      # video/audio resolver (invoked as a subprocess)
-pypdf       # extract text from downloaded PDFs for the AI assistant
+yt-dlp        # video/audio resolver (invoked as a subprocess)
+pypdf         # extract text from downloaded PDFs for the AI assistant
+cryptography  # Fernet encryption for the API-key vault

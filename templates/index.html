@@ -13,13 +13,13 @@
 <body>
     <nav class="navbar">
         <a href="/" class="nav-logo">
-            <div class="nav-logo-icon">🦐</div>
+            <div class="nav-logo-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 7.5c-3.2-.7-6.2.3-8.3 2.7"/><path d="M16.8 9c2.4 1.9 2.8 5.1.6 7.3-2.7 2.6-7.1 2.3-10.1-.4C5.5 14.4 5 12.1 5.8 10"/><path d="M5.8 10C5 9.2 5.1 7.9 6.2 7.3"/><path d="m8.4 16.4-.9 2.4M10.8 16.7l-.4 2.5M13.1 16.2l.8 2.4"/><circle cx="8.2" cy="9.8" r=".5" fill="currentColor"/></svg></div>
             <span class="nav-logo-text">Resource Shrimp</span>
         </a>
         <div class="nav-links">
             <a href="#" class="nav-link" onclick="window.showMain();return false">Download</a>
             <a href="#" class="nav-link" onclick="window.showLibrary();return false">Library</a>
-            <a href="#" class="nav-link" onclick="window.openSettings();return false" title="Settings">⚙</a>
+            <a href="#" class="nav-link nav-gear" onclick="window.openSettings();return false" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v2.8M12 18.7v2.8M21.5 12h-2.8M5.3 12H2.5M18.7 5.3l-2 2M7.3 16.7l-2 2M18.7 18.7l-2-2M7.3 7.3l-2-2"/></svg></a>
             <a href="https://github.com/Reyanda/resource-shrimp" target="_blank" rel="noopener" class="nav-link">GitHub</a>
         </div>
     </nav>
@@ -41,7 +41,7 @@
             </div>
 
             <div class="type-badge" id="typeBadge">
-                <div class="type-icon" id="typeIcon">🎬</div>
+                <div class="type-icon" id="typeIcon"></div>
                 <div class="type-info">
                     <div class="type-label" id="typeLabel">Video</div>
                     <div class="type-hint" id="typeHint">YouTube, Vimeo, TikTok + 1000 more</div>
@@ -61,8 +61,8 @@
                     </div>
                     <div class="options-label">Audio</div>
                     <div class="audio-toggle">
-                        <button class="audio-toggle-btn active" data-mode="video" onclick="window.setMode('video')">🎬 Video + Audio</button>
-                        <button class="audio-toggle-btn" data-mode="audio" onclick="window.setMode('audio')">🎵 Audio Only</button>
+                        <button class="audio-toggle-btn active" data-mode="video" onclick="window.setMode('video')"><svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.2 15 12l-5 2.8V9.2Z" fill="currentColor" stroke="none"/></svg>Video + Audio</button>
+                        <button class="audio-toggle-btn" data-mode="audio" onclick="window.setMode('audio')"><svg class="btn-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17V5l10-2v12"/><circle cx="6" cy="17" r="3"/><circle cx="16" cy="15" r="3"/></svg>Audio Only</button>
                     </div>
                     <div class="audio-formats" id="audioFormats">
                         <div class="audio-chip" data-fmt="mp3" onclick="window.pickA(this)">MP3 <span style="color:var(--muted);font-size:10px">320k</span></div>
@@ -78,17 +78,10 @@
                 </div>
 
                 <div id="articleOptions" style="display:none">
-                    <div class="options-label">Access Method</div>
-                    <div class="access-grid">
-                        <button class="access-btn" onclick="window.openInst()"><span class="access-icon">🏛️</span><span class="access-text"><span class="access-title">Institution</span><span class="access-desc">University login</span></span></button>
-                        <button class="access-btn" onclick="window.openR4L()"><span class="access-icon">🌍</span><span class="access-text"><span class="access-title">Research4Life</span><span class="access-desc">Free for developing regions</span></span></button>
-                        <button class="access-btn" onclick="window.openSH()"><span class="access-icon">📚</span><span class="access-text"><span class="access-title">Sci-Hub</span><span class="access-desc">Open access mirror</span></span></button>
-                        <button class="access-btn" onclick="window.openOA()"><span class="access-icon">🔓</span><span class="access-text"><span class="access-title">Open Access</span><span class="access-desc">Unpaywall + DOAJ</span></span></button>
-                    </div>
-                    <div class="options-label" style="margin-top:16px">Output</div>
-                    <div class="audio-formats active">
-                        <div class="audio-chip selected" data-fmt="pdf" onclick="window.pickArt(this)">📄 PDF Paper</div>
-                        <div class="audio-chip" data-fmt="info" onclick="window.pickArt(this)">ℹ️ Metadata Only</div>
+                    <div class="article-note">
+                        Resource Shrimp fetches the open-access PDF automatically (PMC, open repositories, then publisher).
+                        For subscription-only papers, add your library access in
+                        <a href="#" onclick="window.openSettings();return false">Settings</a>.
                     </div>
                 </div>
             </div>
@@ -136,9 +129,12 @@
                         <summary>AI provider &amp; key</summary>
                         <div class="ask-key-body">
                             <select id="askProvider" class="ask-select">
-                                <option value="">Auto (best available)</option>
+                                <option value="">Auto / default</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic</option>
                                 <option value="groq">Groq</option>
                                 <option value="openrouter">OpenRouter</option>
+                                <option value="deepseek">DeepSeek</option>
                                 <option value="ollama">Ollama (local)</option>
                             </select>
                             <input type="password" id="askKey" class="ask-keyinput" placeholder="Your API key (optional, kept in this browser only)" autocomplete="off">
@@ -180,14 +176,8 @@
                 </div>
                 <div class="set-section">
                     <div class="set-label">Add a provider (API key)</div>
+                    <div class="prov-tiles" id="addProviderTiles"></div>
                     <div class="set-grid">
-                        <select id="addProvider" class="ask-select" onchange="window.onAddProvider()">
-                            <option value="openai">OpenAI</option>
-                            <option value="anthropic">Anthropic (Claude)</option>
-                            <option value="groq">Groq</option>
-                            <option value="openrouter">OpenRouter</option>
-                            <option value="custom">Custom (OpenAI-compatible)</option>
-                        </select>
                         <input id="addKey" class="ask-keyinput" type="password" placeholder="API key" autocomplete="off">
                         <input id="addModel" class="ask-keyinput" placeholder="Model (optional)" autocomplete="off">
                         <input id="addBase" class="ask-keyinput" placeholder="Base URL (custom only)" autocomplete="off" style="display:none">
@@ -195,41 +185,17 @@
                     <button class="drive-btn" onclick="window.connectProvider()">Connect</button>
                     <div id="addMsg" class="set-msg"></div>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Institution Modal -->
-    <div class="modal-overlay" id="instModal" onclick="if(event.target===this)this.classList.remove('active')">
-        <div class="modal-box">
-            <div class="modal-header">
-                <span class="modal-title">Sign in via Institution</span>
-                <button class="modal-close" onclick="document.getElementById('instModal').classList.remove('active')">×</button>
-            </div>
-            <div class="modal-body">
-                <input type="text" class="modal-search" placeholder="Search your university..." oninput="window.filterInst(this.value)" id="instSearch">
-                <div id="instList"></div>
-                <div class="modal-hint">
-                    <strong>Don't see your institution?</strong><br>Many publishers support OpenAthens or Shibboleth. Click "Institutional Login" on the publisher's site.
+                <div class="set-section">
+                    <div class="set-label">Library access (subscription papers)</div>
+                    <div class="set-sub">Stored privately so the app can use your access — no external pop-ups. Open-access papers never need this.</div>
+                    <div class="set-grid">
+                        <input id="accInstitution" class="ask-keyinput" placeholder="Institution / OpenAthens (optional)" autocomplete="off">
+                        <input id="accR4LUser" class="ask-keyinput" placeholder="Research4Life username" autocomplete="off">
+                        <input id="accR4LPass" class="ask-keyinput" type="password" placeholder="Research4Life password" autocomplete="off">
+                    </div>
+                    <button class="drive-btn" onclick="window.saveAccess()">Save access</button>
+                    <div id="accMsg" class="set-msg"></div>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Research4Life Modal -->
-    <div class="modal-overlay" id="r4lModal" onclick="if(event.target===this)this.classList.remove('active')">
-        <div class="modal-box">
-            <div class="modal-header">
-                <span class="modal-title">Research4Life</span>
-                <button class="modal-close" onclick="document.getElementById('r4lModal').classList.remove('active')">×</button>
-            </div>
-            <div class="modal-body">
-                <div class="r4l-card">
-                    <div class="r4l-title">🌍 Free Access for Developing Countries</div>
-                    <div class="r4l-desc">Research4Life provides free access for researchers in the world's poorest countries. Includes HINARI, AGORA, OARE, GOALI, ARDI.</div>
-                    <div class="r4l-eligible">Eligible: Sub-Saharan Africa, South Asia, Southeast Asia, Latin America, Caribbean, Oceania</div>
-                </div>
-                <button class="r4l-btn" onclick="window.open('https://login.research4life.org/','_blank');document.getElementById('r4lModal').classList.remove('active')">🌍 Open Research4Life Login</button>
             </div>
         </div>
     </div>
