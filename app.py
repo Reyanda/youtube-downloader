@@ -2,22 +2,17 @@
 """
 Universal Video Downloader Web App
 Downloads videos from YouTube, Vimeo, TikTok, Twitter, Instagram, and 1000+ sites
+Files stream directly to the user's browser for local download.
 """
 
-from flask import Flask, render_template, request, send_from_directory, jsonify
+from flask import Flask, render_template, request, send_file, jsonify
 import os
+import tempfile
 import yt_dlp
 import threading
 from datetime import datetime
 
 app = Flask(__name__)
-DEFAULT_DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), 'downloads')
-os.makedirs(DEFAULT_DOWNLOAD_DIR, exist_ok=True)
-
-# Track user preferences
-user_preferences = {
-    'download_dir': DEFAULT_DOWNLOAD_DIR
-}
 
 # Track download status
 downloads = {}
@@ -42,10 +37,9 @@ def progress_hook(d, download_id):
         })
 
 
-def download_video(url: str, download_id: str, format_type: str = 'mp4', download_dir: str = None):
-    """Download video in background thread with progress tracking"""
-    download_dir = download_dir or DEFAULT_DOWNLOAD_DIR
-    os.makedirs(download_dir, exist_ok=True)
+def download_video(url: str, download_id: str, format_type: str = 'mp4'):
+    """Download video in background thread, storing in temp directory"""
+    temp_dir = tempfile.mkdtemp()
 
     downloads[download_id] = {
         'status': 'starting',
@@ -58,14 +52,14 @@ def download_video(url: str, download_id: str, format_type: str = 'mp4', downloa
         'error': None,
         'message': 'Initializing...',
         'format': format_type,
-        'download_dir': download_dir,
+        'temp_dir': temp_dir,
         'url': url
     }
 
     if format_type == 'mp3':
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': os.path.join(download_dir, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -76,7 +70,7 @@ def download_video(url: str, download_id: str, format_type: str = 'mp4', downloa
     else:  # mp4
         ydl_opts = {
             'format': 'bestvideo+bestaudio/best',
-            'outtmpl': os.path.join(download_dir, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
             'merge_output_format': 'mp4',
             'progress_hooks': [lambda d: progress_hook(d, download_id)],
         }
@@ -92,10 +86,19 @@ def download_video(url: str, download_id: str, format_type: str = 'mp4', downloa
             ext = 'mp3' if format_type == 'mp3' else 'mp4'
             final_filename = f"{base}.{ext}"
 
+        filepath = os.path.join(temp_dir, final_filename)
+        if not os.path.exists(filepath):
+            # Fallback: find any file in temp_dir
+            for f in os.listdir(temp_dir):
+                if f.endswith(f'.{ext}'):
+                    filepath = os.path.join(temp_dir, f)
+                    break
+
         downloads[download_id].update({
             'status': 'complete',
             'progress': '100',
-            'filename': os.path.basename(final_filename),
+            'filename': os.path.basename(filepath),
+            'filepath': filepath,
             'error': None,
             'message': 'Download complete!',
             'title': info.get('title', 'Unknown'),
@@ -103,7 +106,7 @@ def download_video(url: str, download_id: str, format_type: str = 'mp4', downloa
             'duration': info.get('duration', 0),
             'thumbnail': info.get('thumbnail', '')
         })
-        print(f"[{download_id}] Complete: {final_filename}")
+        print(f"[{download_id}] Complete: {filepath}")
 
     except Exception as e:
         downloads[download_id].update({
@@ -123,7 +126,6 @@ def index():
 def start_download():
     url = request.json.get('url')
     format_type = request.json.get('format', 'mp4')
-    download_dir = request.json.get('download_dir')
 
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
@@ -131,19 +133,8 @@ def start_download():
     if format_type not in ['mp3', 'mp4']:
         return jsonify({'error': 'Invalid format. Use mp3 or mp4'}), 400
 
-    # Validate download directory if provided
-    if download_dir:
-        download_dir = os.path.expanduser(download_dir)
-        if not os.path.exists(download_dir):
-            try:
-                os.makedirs(download_dir, exist_ok=True)
-            except Exception as e:
-                return jsonify({'error': f'Cannot create directory: {str(e)}'}), 400
-        user_preferences['download_dir'] = download_dir
-
     download_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-    actual_dir = download_dir or user_preferences.get('download_dir', DEFAULT_DOWNLOAD_DIR)
-    thread = threading.Thread(target=download_video, args=(url, download_id, format_type, actual_dir))
+    thread = threading.Thread(target=download_video, args=(url, download_id, format_type))
     thread.start()
 
     return jsonify({'download_id': download_id})
@@ -155,43 +146,39 @@ def check_status(download_id):
     return jsonify(status)
 
 
-@app.route('/downloads')
-def list_downloads():
-    download_dir = user_preferences.get('download_dir', DEFAULT_DOWNLOAD_DIR)
-    files = []
-    if os.path.exists(download_dir):
-        for f in os.listdir(download_dir):
-            if f.endswith('.mp4') or f.endswith('.mp3'):
-                path = os.path.join(download_dir, f)
-                files.append({
-                    'name': f,
-                    'size': os.path.getsize(path),
-                    'url': f'/files/{f}',
-                    'type': 'audio' if f.endswith('.mp3') else 'video'
-                })
-    return jsonify(sorted(files, key=lambda x: os.path.getmtime(os.path.join(download_dir, x['name'])), reverse=True))
+@app.route('/stream/<download_id>')
+def stream_file(download_id):
+    """Stream the downloaded file directly to the user's browser"""
+    download = downloads.get(download_id)
+    if not download or download['status'] != 'complete':
+        return jsonify({'error': 'File not ready'}), 404
 
+    filepath = download.get('filepath')
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'error': 'File not found'}), 404
 
-@app.route('/files/<filename>')
-def serve_file(filename):
-    download_dir = user_preferences.get('download_dir', DEFAULT_DOWNLOAD_DIR)
-    return send_from_directory(download_dir, filename)
+    filename = download.get('filename', 'download')
+    mimetype = 'audio/mpeg' if filename.endswith('.mp3') else 'video/mp4'
 
+    def cleanup():
+        """Clean up temp file after streaming"""
+        try:
+            temp_dir = download.get('temp_dir')
+            if temp_dir and os.path.exists(temp_dir):
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            downloads.pop(download_id, None)
+        except Exception:
+            pass
 
-@app.route('/preferences', methods=['GET', 'POST'])
-def preferences():
-    if request.method == 'POST':
-        new_dir = request.json.get('download_dir')
-        if new_dir:
-            new_dir = os.path.expanduser(new_dir)
-            if not os.path.exists(new_dir):
-                return jsonify({'error': 'Directory does not exist'}), 400
-            user_preferences['download_dir'] = new_dir
-        return jsonify({'success': True, 'download_dir': user_preferences['download_dir']})
-    else:
-        return jsonify({
-            'download_dir': user_preferences.get('download_dir', DEFAULT_DOWNLOAD_DIR)
-        })
+    response = send_file(
+        filepath,
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=filename
+    )
+    response.call_on_close(cleanup)
+    return response
 
 
 @app.route('/supported-sites')

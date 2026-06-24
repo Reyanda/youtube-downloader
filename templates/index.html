@@ -117,7 +117,7 @@
         .format-selector {
             display: flex;
             gap: 10px;
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
 
         .format-option {
@@ -159,57 +159,6 @@
 
         .format-icon {
             font-size: 16px;
-        }
-
-        .location-selector {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 15px;
-            padding: 12px;
-            background: #f8f9fa;
-            border-radius: 10px;
-        }
-
-        .location-label {
-            font-size: 12px;
-            color: #666;
-            white-space: nowrap;
-        }
-
-        .location-input {
-            flex: 1;
-            padding: 8px 12px;
-            border: 1px solid #e0e0e0;
-            border-radius: 6px;
-            font-size: 13px;
-            font-family: monospace;
-        }
-
-        .location-input:focus {
-            outline: none;
-            border-color: #6366f1;
-        }
-
-        .location-btn {
-            padding: 8px 14px;
-            background: #6366f1;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            white-space: nowrap;
-        }
-
-        .location-btn:hover {
-            background: #4f46e5;
-        }
-
-        .location-btn:disabled {
-            background: #999;
-            cursor: not-allowed;
         }
 
         /* Progress container */
@@ -289,80 +238,6 @@
             color: #c62828;
         }
 
-        /* Downloads list */
-        .downloads-list {
-            margin-top: 30px;
-            border-top: 1px solid #e0e0e0;
-            padding-top: 20px;
-        }
-
-        .downloads-list h3 {
-            color: #1a1a2e;
-            margin-bottom: 15px;
-            font-size: 16px;
-        }
-
-        .download-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px;
-            background: #f5f5f5;
-            border-radius: 8px;
-            margin-bottom: 8px;
-        }
-
-        .download-item .name {
-            flex: 1;
-            font-size: 13px;
-            color: #333;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .download-item .size {
-            font-size: 12px;
-            color: #999;
-            margin: 0 10px;
-        }
-
-        .download-item a {
-            color: #6366f1;
-            text-decoration: none;
-            font-size: 13px;
-            font-weight: 500;
-        }
-
-        .download-item a:hover {
-            text-decoration: underline;
-        }
-
-        .empty-state {
-            color: #999;
-            font-size: 13px;
-            text-align: center;
-            padding: 20px;
-        }
-
-        .file-badge {
-            font-size: 10px;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-weight: 600;
-            margin-right: 8px;
-        }
-
-        .file-badge.audio {
-            background: #e8f5e9;
-            color: #2e7d32;
-        }
-
-        .file-badge.video {
-            background: #e3f2fd;
-            color: #1976d2;
-        }
-
         /* Animation */
         @keyframes pulse {
             0%, 100% { opacity: 1; }
@@ -377,6 +252,13 @@
             border-radius: 50%;
             margin-right: 6px;
             animation: pulse 1.5s infinite;
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: #999;
+            text-align: center;
+            margin-top: 16px;
         }
     </style>
 </head>
@@ -414,17 +296,6 @@
                     MP3 Audio
                 </label>
             </div>
-        </div>
-
-        <div class="location-selector">
-            <span class="location-label">📁 Save to:</span>
-            <input
-                type="text"
-                id="locationInput"
-                class="location-input"
-                placeholder="Default: ./downloads"
-            >
-            <button id="locationBtn" class="location-btn" onclick="setDownloadLocation()">Set</button>
         </div>
 
         <!-- Progress Section -->
@@ -466,15 +337,11 @@
             <div class="status-message" id="statusMessage"></div>
         </div>
 
-        <div class="downloads-list">
-            <h3>Recent Downloads</h3>
-            <div id="downloadsList"></div>
-        </div>
+        <p class="info-text">Files download directly to your device — nothing stored on the server.</p>
     </div>
 
     <script>
         let pollInterval = null;
-        let currentDownloadDir = './downloads';
 
         async function loadSupportedSites() {
             try {
@@ -486,45 +353,6 @@
                 ).join('');
             } catch (err) {
                 console.error('Failed to load supported sites', err);
-            }
-        }
-
-        async function loadPreferences() {
-            try {
-                const res = await fetch('/preferences');
-                const data = await res.json();
-                currentDownloadDir = data.download_dir;
-                document.getElementById('locationInput').value = currentDownloadDir;
-            } catch (err) {
-                console.error('Failed to load preferences', err);
-            }
-        }
-
-        async function setDownloadLocation() {
-            const newDir = document.getElementById('locationInput').value.trim();
-            if (!newDir) return;
-
-            const btn = document.getElementById('locationBtn');
-            btn.disabled = true;
-
-            try {
-                const res = await fetch('/preferences', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ download_dir: newDir })
-                });
-
-                const data = await res.json();
-                if (data.error) {
-                    alert('Error: ' + data.error);
-                } else {
-                    currentDownloadDir = data.download_dir;
-                    loadDownloads();
-                }
-            } catch (err) {
-                alert('Error: ' + err.message);
-            } finally {
-                btn.disabled = false;
             }
         }
 
@@ -544,7 +372,7 @@
                 const res = await fetch('/download', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url, format, download_dir: currentDownloadDir })
+                    body: JSON.stringify({ url, format })
                 });
 
                 const data = await res.json();
@@ -573,10 +401,12 @@
                     } else if (data.status === 'complete') {
                         clearInterval(pollInterval);
                         updateProgress(data);
-                        showStatus('complete', '✓ Download complete!');
+                        showStatus('complete', '✓ Download starting to your device!');
                         btn.disabled = false;
                         document.getElementById('urlInput').value = '';
-                        loadDownloads();
+
+                        // Trigger browser download
+                        triggerDownload(downloadId);
                     } else if (data.status === 'error') {
                         clearInterval(pollInterval);
                         showStatus('error', 'Error: ' + data.error);
@@ -589,6 +419,15 @@
                     btn.disabled = false;
                 }
             }, 500);
+        }
+
+        function triggerDownload(downloadId) {
+            const a = document.createElement('a');
+            a.href = `/stream/${downloadId}`;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => a.remove(), 1000);
         }
 
         function updateProgress(data) {
@@ -628,42 +467,6 @@
             statusEl.style.display = 'block';
         }
 
-        async function loadDownloads() {
-            try {
-                const res = await fetch('/downloads');
-                const files = await res.json();
-                const list = document.getElementById('downloadsList');
-
-                if (files.length === 0) {
-                    list.innerHTML = '<p class="empty-state">No downloads yet</p>';
-                    return;
-                }
-
-                list.innerHTML = files.map(f => `
-                    <div class="download-item">
-                        <span class="name">
-                            <span class="file-badge ${f.type === 'audio' ? 'audio' : 'video'}">
-                                ${f.type === 'audio' ? 'MP3' : 'MP4'}
-                            </span>
-                            ${f.name}
-                        </span>
-                        <span class="size">${formatSize(f.size)}</span>
-                        <a href="${f.url}" download>Download</a>
-                    </div>
-                `).join('');
-
-            } catch (err) {
-                console.error('Failed to load downloads', err);
-            }
-        }
-
-        function formatSize(bytes) {
-            if (bytes < 1024 * 1024) {
-                return (bytes / 1024).toFixed(1) + ' KB';
-            }
-            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-        }
-
         // Allow Enter key to start download
         document.getElementById('urlInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') startDownload();
@@ -671,8 +474,6 @@
 
         // Initialize
         loadSupportedSites();
-        loadPreferences();
-        loadDownloads();
     </script>
 </body>
 </html>
