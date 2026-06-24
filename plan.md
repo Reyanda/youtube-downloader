@@ -1,3 +1,50 @@
+# Plan — Reyanda product unification (OCS-aligned)  [ACTIVE]
+
+## Goal
+One coherent suite under `reyanda.github.io`: single sign-in landing, products sharing the
+Open Canvas Studio (OCS) look-and-feel + a unified header, logout-to-home everywhere, one
+shared settings pane, one admin console (OCS *and* Shrimp users), and the Systematic Review
+pipeline as its own product.
+
+## Repos
+- `Reyanda/reyanda.github.io` — landing launcher (single sign-in; only index.html).
+- `Reyanda/resource-shrimp` — Shrimp (this repo): Python→Render; static→Pages `docs/`.
+- `Reyanda/open-canvas-studio` — OCS React/Vite (Pages) + Fastify server (Render) + Neon PG.
+- `Reyanda/open-canvas-studio-data` — user registry / analytics (admin store).
+
+## Shared contract (true today)
+Both products gate on `localStorage['reyanda_user']`, redirect to `/` when absent.
+`window.signOut()` clears it → `/`. Launcher is the canonical login.
+
+## OCS "feel" (src/styles/foundation/tokens.css + materials.css), dark = deployed default
+ink `#f5f5f7 / #c7c7cc / #8e8e93`; `--glass-fill-rgb 28 28 30`; neutral accent `#A1A1A6`;
+navy ambient `#0b1220`; radii 26/20/12/pill; topbar 76px; glass blur20 saturate180; Inter.
+Logout sits in a right-aligned account menu in the glass TopBar.
+
+## Slices (ship + browser-verify each before next)
+1. DONE — Landing = research toolkit; 3 tiles (Shrimp/Systematic Review/OCS); SR `#review`
+   deep-link; unified sign-out→home in Shrimp (docs + templates).
+2. IN PROGRESS — Shrimp chrome → OCS feel: remap dark palette to OCS navy/ink glass; align
+   header; drop stale marketing hero. CSS-variable remap only (no DOM rewrite), verify live.
+3. OCS logout→home: `src/lib/auth.ts logout()` also clears reyanda_user + `location.assign('/')`.
+   Needs npm build + Pages redeploy.
+4. Shared settings pane mirroring OCS `SettingsPanel.tsx` tabs (Appearance/AI keys/Storage/
+   Account); apply in Shrimp; OCS stays source of truth.
+5. Systematic Review = own product: new Pages repo/deploy on same Render backend; move
+   `#review` UI out of Shrimp; launcher tile → its own URL.
+6. Admin console manages Shrimp users: backend `/console/shrimp-users` (ConsoleUser shape) +
+   "Shrimp" section in OCS `ControlPanel.tsx`/`consoleData.ts`; shared user store.
+
+## Validation
+Per slice: live browser check (login→tiles, chrome, logout→home); Shrimp `scripts/smoke.py`;
+OCS `npm run build` + server `node --test` for slices 3/6.
+
+## Risks / fallback
+OCS slices need Vite build + Render redeploy + Neon DB — heavier; do after Shrimp slices.
+Reskin must not break Shrimp UI: remap variables only, keep dark default, verify live.
+
+---
+
 # Resource Shrimp — roadmap to a general resource tool
 
 ## Done
