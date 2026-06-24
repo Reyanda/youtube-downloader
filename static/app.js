@@ -36,6 +36,13 @@
 
     function hideType(){document.getElementById('typeBadge').classList.remove('active');document.getElementById('optionsPanel').classList.remove('active');type='video'}
 
+    // ── Rooms (multi-app switcher: Shrimp ⇄ Open Canvas Studio) ──────
+    window.toggleRooms=function(e){if(e)e.stopPropagation();document.getElementById('roomsPanel').classList.toggle('open')};
+    document.addEventListener('click',function(e){
+        var p=document.getElementById('roomsPanel'),b=document.getElementById('roomsBtn');
+        if(p&&p.classList.contains('open')&&!p.contains(e.target)&&b&&!b.contains(e.target))p.classList.remove('open');
+    });
+
     window.pickQ=function(el){document.querySelectorAll('.quality-card').forEach(function(c){c.classList.remove('selected')});el.classList.add('selected');quality=el.dataset.q};
     window.setMode=function(m){audioMode=m;document.querySelectorAll('.audio-toggle-btn').forEach(function(b){b.classList.toggle('active',b.dataset.mode===m)});document.getElementById('audioFormats').classList.toggle('active',m==='audio');document.querySelectorAll('.quality-card').forEach(function(c){c.style.opacity=m==='audio'?'0.4':'1'});if(m==='audio'){quality='audio';document.querySelectorAll('.quality-card').forEach(function(c){c.classList.remove('selected')})}else{var d=document.querySelector('.quality-card[data-q="1080p"]');if(d){d.classList.add('selected');quality='1080p'}}};
     window.pickA=function(el){document.querySelectorAll('.audio-chip[data-fmt]').forEach(function(c){c.classList.remove('selected')});el.classList.add('selected');audioFmt=el.dataset.fmt};

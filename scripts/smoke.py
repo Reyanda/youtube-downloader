@@ -61,6 +61,8 @@ def main():
                 break
             time.sleep(0.2)
         check("server boots + serves /", get("/")[0] == 200)
+        hcode, hbody = get("/health")
+        check("/health", hcode == 200 and json.loads(hbody).get("ok") is True)
 
         print("3) endpoints")
         ck = "rs_session=smoke_session_001"

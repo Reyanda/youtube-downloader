@@ -764,13 +764,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+
+        # Health check (unrated — matches OCS's healthCheckPath convention)
+        if path == '/health':
+            self.send_json({'ok': True, 'app': 'resource-shrimp'})
+            return
+
         ip = self.client_address[0]
         if not rate_check(ip):
             self.send_json({'error': 'Rate limit exceeded'}, 429)
             return
-
-        parsed = urlparse(self.path)
-        path = unquote(parsed.path)
 
         # Serve index
         if path == '/':

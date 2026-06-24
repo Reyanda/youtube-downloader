@@ -1,0 +1,22 @@
+name: CI
+
+# Sibling convention to open-canvas-studio: the build/smoke gate must pass
+# before main is considered deployable (see AGENTS.md HARD RULE 1).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install runtime deps
+        run: pip install -r requirements.txt
+      - name: Smoke gate (imports + boot + endpoints)
+        run: python scripts/smoke.py
