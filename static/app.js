@@ -685,4 +685,19 @@
         var p=new URLSearchParams(window.location.search);
         if(p.get('drive')){history.replaceState({},'',window.location.pathname);window.showLibrary()}
     })();
+
+    // Deep-link: the Systematic Review product opens its workspace directly
+    // via #review (launcher tile, shared until it lives in its own repo).
+    (function(){
+        function openFromHash(){ if(location.hash==='#review'&&window.showReview){window.showReview();} }
+        window.addEventListener('hashchange',openFromHash);
+        openFromHash();
+    })();
+
+    // Unified sign-out — every product clears the shared session and returns
+    // to the landing page, which is the single sign-in point for all rooms.
+    window.signOut=function(){
+        try{localStorage.removeItem('reyanda_user');}catch(e){}
+        location.href='/';
+    };
 })();
