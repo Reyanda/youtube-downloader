@@ -122,7 +122,7 @@
     function hideViews(){document.getElementById('libraryView').style.display='none';var rv=document.getElementById('reviewView');if(rv)rv.style.display='none'}
     window.showLibrary=function(){mainEls().forEach(function(e){if(e)e.style.display='none'});hideViews();document.getElementById('libraryView').style.display='block';window.scrollTo(0,0);loadDrive();loadProjects();loadLibrary('')};
     window.showMain=function(){hideViews();mainEls().forEach(function(e){if(e&&e.id!=='progressSection')e.style.display=''})};
-    window.showReview=function(){mainEls().forEach(function(e){if(e)e.style.display='none'});hideViews();document.getElementById('reviewView').style.display='block';window.scrollTo(0,0);if(!document.querySelectorAll('#srConcepts .sr-concept').length){addConcept('Population');addConcept('Intervention/Exposure');addConcept('Outcome')}};
+    window.showReview=function(){mainEls().forEach(function(e){if(e)e.style.display='none'});hideViews();document.getElementById('reviewView').style.display='block';window.scrollTo(0,0);if(!document.querySelectorAll('#srConcepts .sr-concept').length){addConcept('Population / Phenomenon');addConcept('Intervention / Input');addConcept('Measure / Outcome')}};
 
     function refreshLibIfOpen(){if(document.getElementById('libraryView').style.display==='block'){var s=document.getElementById('libSearch');loadLibrary(s?s.value.trim():'')}}
 
@@ -392,7 +392,7 @@
     }
 
     // ── Systematic review: search-strategy builder ───────────────────
-    var SR_LABELS=['Population','Intervention/Exposure','Comparator','Outcome','Other'];
+    var SR_LABELS=['Population / Phenomenon','Realm / Domain','Intervention / Input','Standard / Comparator','Measure / Outcome','Time / Temporal','Geography / Setting','Design / Methodology'];
     var lastStrategy=null, lastResults=[];
     window.addConcept=function(label,terms){
         var wrap=document.getElementById('srConcepts');
@@ -424,7 +424,8 @@
             if(d.error){srMsg(d.error,'err');return}srMsg('');renderStrategy(d)})
         .catch(function(){if(btn){btn.disabled=false;btn.textContent=btn.dataset.t}srMsg('Request failed.','err')});
     }
-    window.buildStrategy=function(){var c=collectConcepts();if(!c.length){srMsg('Add at least one concept with terms.','err');return}postStrategy({concepts:c},document.getElementById('srBuildBtn'))};
+    function collectExclude(){var e=document.getElementById('srExclude');return e?e.value.split(',').map(function(t){return t.trim()}).filter(Boolean):[]}
+    window.buildStrategy=function(){var c=collectConcepts();if(!c.length){srMsg('Add at least one facet with terms.','err');return}postStrategy({concepts:c,exclude:collectExclude()},document.getElementById('srBuildBtn'))};
     window.buildFromQuestion=function(e){var q=document.getElementById('srQuestion').value.trim();if(!q){srMsg('Type a question first.','err');return}postStrategy({question:q})};
     function renderStrategy(d){
         lastStrategy=d; lastResults=[];
@@ -434,6 +435,7 @@
             var mesh=(c.descriptors||[]).join(', ');
             return '<div class="sr-concept-tag"><b>'+esc(c.label||'')+'</b>'+(mesh?(' · MeSH: '+esc(mesh)):' · no MeSH match (free-text only)')+'</div>';
         }).join('');
+        if(d.exclude&&d.exclude.length)resolved+='<div class="sr-concept-tag sr-excl-tag"><b>Excluded (NOT)</b> · '+esc(d.exclude.join(', '))+'</div>';
         out.innerHTML='<div class="sr-resolved">'+resolved+'</div>'+
             blocks.map(function(b,i){return '<div class="sr-block"><div class="sr-block-head"><span>'+esc(b[0])+'</span><button class="lib-btn sr-copy" data-i="'+i+'">Copy</button></div><pre class="sr-pre">'+esc(b[1]||'')+'</pre></div>'}).join('')+
             (d.note?('<div class="sr-note">'+esc(d.note)+'</div>'):'')+

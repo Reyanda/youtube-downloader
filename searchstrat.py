@@ -121,8 +121,13 @@ def _cochrane_block(descriptors, free):
     return "(" + " OR ".join(parts) + ")"
 
 
-def build(concepts):
-    """Build database-specific strategies from resolved concepts."""
+def build(concepts, exclude=None):
+    """Build database-specific strategies from PRISM facet blocks.
+
+    concepts = the facet blocks (P/R/I/S/M/T/G/D), each AND-combined ("blocked"
+    lock-in). exclude = noise terms subtracted via a NOT block (PRISM's
+    iteratively-refined exclusion set).
+    """
     resolved = []
     for c in concepts:
         descriptors, free = _concept_terms(c)
@@ -130,20 +135,28 @@ def build(concepts):
             continue
         resolved.append({"label": c.get("label", ""), "descriptors": descriptors,
                          "free": free})
+    excl = [str(t).strip() for t in (exclude or []) if str(t).strip()]
     if not resolved:
-        return {"concepts": [], "pubmed": "", "ovid": "", "cochrane": ""}
+        return {"concepts": [], "exclude": excl, "pubmed": "", "ovid": "", "cochrane": ""}
 
     pubmed = "\nAND\n".join(_pubmed_block(c["descriptors"], c["free"]) for c in resolved)
     ovid = " and ".join(_ovid_block(c["descriptors"], c["free"]) for c in resolved)
     cochrane = "\nAND\n".join(_cochrane_block(c["descriptors"], c["free"]) for c in resolved)
+    if excl:
+        pubmed += "\nNOT\n(" + " OR ".join(f'{_phrase(t)}[tiab]' for t in excl) + ")"
+        ovid += " not (" + " or ".join(f'{t}.ti,ab.' for t in excl) + ")"
+        cochrane += "\nNOT\n(" + " OR ".join(f'{_phrase(t)}:ti,ab,kw' for t in excl) + ")"
     return {
+        "framework": "PRISM",
         "concepts": resolved,
+        "exclude": excl,
         "pubmed": pubmed,
         "ovid": ovid,        # Ovid MEDLINE / Embase syntax
         "cochrane": cochrane,
-        "note": ("MeSH terms auto-explode in PubMed; Ovid uses exp/. Verify field "
-                 "tags, add date/language limits and study-design filters per protocol. "
-                 "Peer-review the strategy (PRESS) before running."),
+        "note": ("PRISM blocked strategy: each facet AND-combined, noise removed via NOT. "
+                 "MeSH auto-explodes in PubMed; Ovid uses exp/. Add Time (date), Geography "
+                 "and Design filters per protocol; refine the NOT block after TIAB screening. "
+                 "Peer-review (PRESS) before running."),
     }
 
 
@@ -243,10 +256,14 @@ def to_csv(records):
 # ── Optional: LLM decomposition of a free-text question into PICO concepts ──
 DECOMP_PROMPT = (
     "You are a systematic-review information specialist. Decompose the user's "
-    "question into PICO/PECO concepts for a literature search. Return ONLY JSON: "
-    '{"concepts":[{"label":"Population|Intervention/Exposure|Comparator|Outcome",'
-    '"terms":["seed term", ...]}]}. Use 2-4 concepts; 1-4 concise seed terms each '
-    "(prefer canonical noun phrases that map to controlled vocabulary). No prose.")
+    "question into the PRISM framework (beyond PICO/PECO). Facets: Population/"
+    "Phenomenon, Realm/Domain, Intervention/Input, Standard/Comparator, "
+    "Measure/Outcome, Time/Temporal, Geography/Setting, Design/Methodology. "
+    "Include only the facets the question actually specifies (always include the "
+    "core blocks Population, Intervention/Input, Measure/Outcome when present). "
+    "Return ONLY JSON: {\"concepts\":[{\"label\":\"<facet>\",\"terms\":[\"seed\",...]}],"
+    '"exclude":["noise term to NOT-exclude", ...]}. 1-4 concise canonical seed '
+    "terms per facet (map to controlled vocabulary). exclude may be empty. No prose.")
 
 
 def concepts_from_question(question, chat_fn):
@@ -258,4 +275,4 @@ def concepts_from_question(question, chat_fn):
     if not m:
         raise ValueError("Could not parse concepts from the model output")
     data = json.loads(m.group(0))
-    return data.get("concepts", [])
+    return data.get("concepts", []), data.get("exclude", [])

@@ -1509,31 +1509,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             sid = get_session(self)
             concepts = data.get('concepts')
-            # If no concepts, decompose a free-text question with the LLM
+            exclude = data.get('exclude') or []
+            # If no concepts, decompose a free-text question into PRISM facets
             if not concepts:
                 question = (data.get('question') or '').strip()
                 if not question or len(question) > 2000:
-                    self.send_json({'error': 'Provide PICO concepts or a question'}, 400)
+                    self.send_json({'error': 'Provide PRISM facets or a question'}, 400)
                     return
                 provider, key, model, base_url = self._resolve_ai(sid, data)
                 try:
                     chat_fn = lambda msgs: ai.chat(msgs, provider=provider, key=key,
                                                    model=model, base_url=base_url)
-                    concepts = searchstrat.concepts_from_question(question, chat_fn)
+                    concepts, exclude = searchstrat.concepts_from_question(question, chat_fn)
                 except Exception as e:
                     self.send_json({'error': f'Could not decompose question: {e}'}, 502)
                     return
-            # Sanitise concepts (bound counts + lengths)
+            # Sanitise facets (bound counts + lengths) — up to the 8 PRISM dimensions
             clean = []
-            for c in (concepts or [])[:6]:
-                terms = [str(t).strip()[:80] for t in (c.get('terms') or []) if str(t).strip()][:6]
+            for c in (concepts or [])[:8]:
+                terms = [str(t).strip()[:80] for t in (c.get('terms') or []) if str(t).strip()][:8]
                 if terms:
                     clean.append({'label': str(c.get('label', ''))[:40], 'terms': terms})
             if not clean:
-                self.send_json({'error': 'No usable concepts'}, 400)
+                self.send_json({'error': 'No usable facets'}, 400)
                 return
+            excl = [str(t).strip()[:80] for t in (exclude or []) if str(t).strip()][:12]
             try:
-                self.send_json(searchstrat.build(clean))
+                self.send_json(searchstrat.build(clean, excl))
             except Exception as e:
                 self.send_json({'error': f'Strategy build failed: {e}'}, 502)
             return

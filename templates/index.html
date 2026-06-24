@@ -166,11 +166,12 @@
         <section class="review-view" id="reviewView" style="display:none">
             <div class="library-head">
                 <h2>Search strategy</h2>
-                <p>Clean PICO/PECO in → PRESS-aligned, MeSH-grounded strategies out.</p>
+                <p>PRISM framework (P·R·I·S·M·T·G·D — beyond PICO/PECO) → PRESS-aligned, MeSH-grounded strategies.</p>
             </div>
             <div class="sr-builder">
                 <div class="sr-concepts" id="srConcepts"></div>
-                <button class="sr-add" id="srAdd" onclick="window.addConcept()">+ Add concept</button>
+                <button class="sr-add" id="srAdd" onclick="window.addConcept()">+ Add facet</button>
+                <input id="srExclude" class="sr-terms sr-exclude" placeholder="Exclude (NOT) — noise terms, comma-separated (optional)">
                 <div class="sr-actions"><button class="drive-btn" id="srBuildBtn" onclick="window.buildStrategy()">Build strategy</button></div>
                 <details class="ask-key">
                     <summary>Or paste a question (decompose with AI)</summary>
