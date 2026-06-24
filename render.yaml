@@ -1,5 +1,4 @@
 services:
-  # Sibling of open-canvas-studio-api — same Render deploy convention.
   - type: web
     name: resource-shrimp
     runtime: python
@@ -10,22 +9,12 @@ services:
     envVars:
       - key: PORT
         value: 8080
-      # The sibling app (Open Canvas Studio) — powers the room switcher.
       - key: SIBLING_OCS_URL
         value: https://reyanda.github.io/open-canvas-studio/
-      # Google Drive sync (optional). Set these in the Render dashboard to
-      # activate; leave unset and the Drive feature stays hidden/disabled.
-      - key: GOOGLE_CLIENT_ID
-        sync: false
-      - key: GOOGLE_CLIENT_SECRET
-        sync: false
-      - key: OAUTH_REDIRECT_BASE
-        sync: false
-      # CORS — restrict to your Pages domain in production; '*' for dev.
       - key: CORS_ORIGINS
-        value: '*'
-      # Google Drive sync (optional). Set these in the Render dashboard to
-      # activate; leave unset and the Drive feature stays hidden/disabled.
+        value: https://reyanda.github.io
+      # Google OAuth — set these in the Render dashboard (Env tab).
+      # They are secrets so they must NOT appear in render.yaml.
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
