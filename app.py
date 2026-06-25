@@ -1071,9 +1071,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             "form-action 'self'"
         )
         self.send_header('Content-Security-Policy', csp)
-        # CORS — allow the GitHub Pages frontend to call this API
+        # CORS — allow the configured frontends (Pages + the AWS custom domain).
+        # CORS_ORIGINS is a comma-separated allowlist; reflect the caller's Origin
+        # when it's on the list so multiple frontends can share this API.
         allowed = os.environ.get('CORS_ORIGINS', '*')
-        self.send_header('Access-Control-Allow-Origin', allowed)
+        if allowed == '*':
+            self.send_header('Access-Control-Allow-Origin', '*')
+        else:
+            allow_list = [o.strip() for o in allowed.split(',') if o.strip()]
+            origin = self.headers.get('Origin', '')
+            chosen = origin if origin in allow_list else (allow_list[0] if allow_list else '*')
+            self.send_header('Access-Control-Allow-Origin', chosen)
+            self.send_header('Vary', 'Origin')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.send_header('Access-Control-Max-Age', '86400')
