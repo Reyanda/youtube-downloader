@@ -419,7 +419,29 @@
     };
     function provIcon(p){return '<span class="prov-ico">'+(PROVIDER_ICONS[p]||PROVIDER_ICONS.custom)+'</span>'}
     var selectedAddProvider='openai';
-    window.openSettings=function(){loadSettings();loadAccess();document.getElementById('settingsModal').classList.add('active')};
+    window.openSettings=function(){loadSettings();loadAccess();loadYtCookies();document.getElementById('settingsModal').classList.add('active')};
+    function loadYtCookies(){
+        fetch(API_BASE+'/api/youtube-cookies',{credentials:'include'}).then(function(r){return r.json()}).then(function(d){
+            var m=document.getElementById('ytMsg');if(!m)return;
+            if(d.has_cookies){m.textContent='Cookies saved'+(d.updated_at?(' ('+d.updated_at+' UTC)'):'')+'.';m.className='set-msg ok'}
+            else{m.textContent='';m.className='set-msg'}
+        }).catch(function(){});
+    }
+    window.saveYtCookies=function(){
+        var ta=document.getElementById('ytCookies');var m=document.getElementById('ytMsg');
+        var val=(ta&&ta.value||'').trim();
+        if(!val){m.textContent='Paste your cookies.txt first (or use Clear).';m.className='set-msg err';return}
+        m.textContent='Saving…';m.className='set-msg';
+        fetch(API_BASE+'/api/youtube-cookies',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookies:val})})
+        .then(function(r){return r.json()}).then(function(d){if(d.error){m.textContent=d.error;m.className='set-msg err'}else{m.textContent='Saved — your YouTube downloads will use these.';m.className='set-msg ok';if(ta)ta.value=''}})
+        .catch(function(){m.textContent='Failed.';m.className='set-msg err'});
+    };
+    window.clearYtCookies=function(){
+        var m=document.getElementById('ytMsg');m.textContent='Clearing…';m.className='set-msg';
+        fetch(API_BASE+'/api/youtube-cookies',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookies:''})})
+        .then(function(r){return r.json()}).then(function(){var ta=document.getElementById('ytCookies');if(ta)ta.value='';m.textContent='Cleared.';m.className='set-msg';setTimeout(function(){m.textContent=''},1500)})
+        .catch(function(){m.textContent='Failed.';m.className='set-msg err'});
+    };
     function loadAccess(){
         fetch(API_BASE+'/api/access').then(function(r){return r.json()}).then(function(d){
             document.getElementById('accInstitution').value=d.institution||'';

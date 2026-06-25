@@ -252,6 +252,16 @@
                     <button class="drive-btn" onclick="window.saveAccess()">Save access</button>
                     <div id="accMsg" class="set-msg"></div>
                 </div>
+                <div class="set-section">
+                    <div class="set-label">YouTube access (fix &ldquo;confirm you&rsquo;re not a bot&rdquo;)</div>
+                    <div class="set-sub">YouTube blocks downloads from cloud servers. Paste your own YouTube cookies (Netscape <code>cookies.txt</code> &mdash; export with a &ldquo;Get cookies.txt&rdquo; browser extension while signed in to YouTube). Stored privately, used only for your downloads. Tip: use a throwaway account &mdash; cookies expire and need occasional refresh.</div>
+                    <textarea id="ytCookies" class="sr-q" placeholder="# Netscape HTTP Cookie File&#10;# paste your youtube.com cookies.txt contents here" style="min-height:96px;font-family:monospace;font-size:12px"></textarea>
+                    <div class="set-btn-row">
+                        <button class="drive-btn ghost" onclick="window.clearYtCookies()">Clear</button>
+                        <button class="drive-btn" onclick="window.saveYtCookies()">Save cookies</button>
+                    </div>
+                    <div id="ytMsg" class="set-msg"></div>
+                </div>
             </div>
         </div>
     </div>

@@ -106,6 +106,13 @@ def init():
             r4l_pass    TEXT
         )
     """)
+    _conn.execute("""
+        CREATE TABLE IF NOT EXISTS youtube_creds (
+            session    TEXT PRIMARY KEY,
+            cookies    TEXT,
+            updated_at TEXT
+        )
+    """)
     # Migration: add project_id to resources if an older DB lacks it
     cols = [r["name"] for r in _conn.execute("PRAGMA table_info(resources)").fetchall()]
     if "project_id" not in cols:
@@ -450,6 +457,36 @@ def get_access(session, with_secret=False):
            "has_r4l_pass": bool(d.get("r4l_pass"))}
     if with_secret:
         out["r4l_pass"] = d.get("r4l_pass")
+    return out
+
+
+# ── Per-user YouTube cookies (Netscape cookies.txt) ─────────────────
+def set_youtube_cookies(session, cookies):
+    """Store (or clear) this user's YouTube cookies.txt. Used only for their
+    own downloads, to pass YouTube's 'confirm you're not a bot' check."""
+    with _lock:
+        if cookies and cookies.strip():
+            _conn.execute(
+                "INSERT OR REPLACE INTO youtube_creds (session, cookies, updated_at) "
+                "VALUES (?,?,datetime('now'))",
+                (session, cookies),
+            )
+        else:
+            _conn.execute("DELETE FROM youtube_creds WHERE session = ?", (session,))
+        _conn.commit()
+
+
+def get_youtube_cookies(session, with_secret=False):
+    """Return {'has_cookies': bool, 'updated_at': str}; include 'cookies' if asked."""
+    with _lock:
+        row = _conn.execute(
+            "SELECT cookies, updated_at FROM youtube_creds WHERE session = ?", (session,)
+        ).fetchone()
+    if not row or not row["cookies"]:
+        return {"has_cookies": False, "updated_at": None}
+    out = {"has_cookies": True, "updated_at": row["updated_at"]}
+    if with_secret:
+        out["cookies"] = row["cookies"]
     return out
 
 

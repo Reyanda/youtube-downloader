@@ -443,6 +443,8 @@ def progress_hook(d, did):
             })
 
 _ytdlp_cookie_path = None
+# Per-download YouTube cookie files (from each user's Settings), keyed by download id.
+_yt_cookies_by_did = {}
 def ytdlp_cookies_file():
     """Return a cookies.txt path for yt-dlp, or None.
 
@@ -535,7 +537,9 @@ def download_video(url, did, quality='1080p', subtitles=False, fmt='mp4'):
         cmd += ['--extractor-args', f'youtubepot-bgutilhttp:base_url=http://127.0.0.1:{POT_PORT}']
         if os.path.isdir(POT_PLUGINS):
             cmd += ['--plugin-dirs', POT_PLUGINS]
-    ck = ytdlp_cookies_file()
+    # This user's own YouTube cookies (from Settings) take priority over the
+    # server-wide YTDLP_COOKIES fallback. Per-user cookies pass the bot check.
+    ck = _yt_cookies_by_did.pop(did, None) or ytdlp_cookies_file()
     if ck:
         cmd += ['--cookies', ck]
     # Route through a residential proxy (the reliable fix for YouTube blocking a
@@ -1254,6 +1258,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                            {'institution': None, 'r4l_user': None, 'has_r4l_pass': False})
             return
 
+        # Per-user YouTube cookies status (never returns the cookie value)
+        if path == '/api/youtube-cookies':
+            sid = get_session(self)
+            self.send_json(library.get_youtube_cookies(sid) if sid else
+                           {'has_cookies': False, 'updated_at': None})
+            return
+
         # AI assistant availability + connected providers + settings
         if path == '/api/ai/status':
             sid = get_session(self)
@@ -1881,6 +1892,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json({'ok': True})
             return
 
+        # Save (or clear) this user's YouTube cookies.txt
+        if path == '/api/youtube-cookies':
+            data = self.read_json_body()
+            if data is None:
+                return
+            sid = get_session(self)
+            set_cookie = None
+            if not sid:
+                sid = new_session()
+                set_cookie = session_cookie(sid)
+            cookies = (data.get('cookies') or '')[:200000]
+            library.set_youtube_cookies(sid, cookies)
+            self.send_json({'ok': True, 'has_cookies': bool(cookies.strip())}, cookie=set_cookie)
+            return
+
         # ── Vault (API key encryption) ─────────────────────────────
         if path == '/api/vault/unlock':
             data = self.read_json_body()
@@ -2144,6 +2170,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _run_provider(self, provider, url, opts, did, session):
         global ACTIVE_DOWNLOADS
         try:
+            # Per-user YouTube cookies (from Settings): write to a temp file this
+            # download will use, so YouTube treats it as a signed-in request.
+            try:
+                yc = library.get_youtube_cookies(session, with_secret=True)
+                if yc.get('cookies'):
+                    fd, p = tempfile.mkstemp(prefix='ytuser_', suffix='.txt')
+                    raw = yc['cookies']
+                    with os.fdopen(fd, 'w') as f:
+                        f.write(raw if raw.endswith('\n') else raw + '\n')
+                    _yt_cookies_by_did[did] = p
+            except Exception as e:
+                print(f"[yt] per-user cookies failed: {e}", file=sys.stderr)
             provider.resolve(url, opts, did)
             with downloads_lock:
                 job = dict(downloads.get(did, {}))
