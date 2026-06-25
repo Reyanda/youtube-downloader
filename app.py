@@ -469,6 +469,28 @@ def ytdlp_cookies_file():
         return None
 
 
+# bgutil PO token provider — the "underground" YouTube token refresher. yt-dlp's
+# plugin auto-calls this local service ONLY for YouTube URLs, minting a fresh
+# proof-of-origin token per request to get past the bot check on flagged IPs.
+POT_BIN = os.path.join(BASE, 'bin', 'bgutil-pot')
+POT_PLUGINS = os.path.join(BASE, 'yt-dlp-plugins')
+POT_PORT = int(os.environ.get('POT_PORT', '4416'))
+_pot_started = False
+
+def start_pot_provider():
+    """Launch the token refresher as a background daemon if its binary exists."""
+    global _pot_started
+    if _pot_started or not os.path.isfile(POT_BIN):
+        return
+    try:
+        subprocess.Popen([POT_BIN, 'server', '--host', '127.0.0.1', '--port', str(POT_PORT)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _pot_started = True
+        print(f'[pot] YouTube token refresher running on 127.0.0.1:{POT_PORT}', file=sys.stderr)
+    except Exception as e:
+        print(f'[pot] failed to start: {e}', file=sys.stderr)
+
+
 def download_video(url, did, quality='1080p', subtitles=False, fmt='mp4'):
     global ACTIVE_DOWNLOADS
     temp_dir = tempfile.mkdtemp(dir=TEMP_ROOT, prefix="vid_")
@@ -506,6 +528,13 @@ def download_video(url, did, quality='1080p', subtitles=False, fmt='mp4'):
     ex_args = os.environ.get('YTDLP_EXTRACTOR_ARGS', 'youtube:player_client=default,web_safari,mweb,tv')
     if ex_args:
         cmd += ['--extractor-args', ex_args]
+    # Underground token refresher: yt-dlp mints a fresh PO token via the local
+    # bgutil provider (auto-triggered for YouTube only) when it's available.
+    if os.path.isfile(POT_BIN):
+        start_pot_provider()
+        cmd += ['--extractor-args', f'youtubepot-bgutilhttp:base_url=http://127.0.0.1:{POT_PORT}']
+        if os.path.isdir(POT_PLUGINS):
+            cmd += ['--plugin-dirs', POT_PLUGINS]
     ck = ytdlp_cookies_file()
     if ck:
         cmd += ['--cookies', ck]
@@ -2134,6 +2163,7 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 if __name__ == '__main__':
     print(f"Resource Shrimp running on http://0.0.0.0:{PORT}", file=sys.stderr)
+    start_pot_provider()   # warm the YouTube token refresher (no-op if absent)
     srv = ThreadedHTTPServer(("0.0.0.0", PORT), Handler)
     try:
         srv.serve_forever()
